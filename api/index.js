@@ -25,10 +25,13 @@ app.post('/api/ping', (req, res) => {
     const existing = global.devices[deviceId] || {};
     const shouldReset = existing.resetRequested || false;
 
+    const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
+
     global.devices[deviceId] = {
         deviceId: deviceId,
         lastSeen: now,
         onlineSince: onlineSince,
+        chatId: chatId || (existing.chatId || ''),
         resetRequested: false,
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
@@ -144,10 +147,20 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 } catch (e) {
                     replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN MARACAY</b>\n\n📍 <b>Ubicación:</b> Maracay, Aragua\n🌡️ <b>Temperatura aproximada:</b> 26 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
                 }
+            } else if (text.includes('/reiniciar')) {
+                const allDevs = Object.values(global.devices || {});
+                const userDev = allDevs.find(d => d.chatId == chatId);
+                if (userDev) {
+                    global.devices[userDev.deviceId].resetRequested = true;
+                    replyMsg = `🔄 <b>Orden de reinicio enviada a:</b> <code>${userDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`;
+                } else {
+                    replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nVerifica que tu placa esté enviando reportes a Vercel.`;
+                }
             } else if (text.includes('/estado') || text.includes('estado')) {
                 const now = Date.now();
-                // Buscar dispositivos asociados o activos
-                const allDevs = Object.values(global.devices || {});
+                // Ordenar dispositivos por el más recientemente activo (lastSeen)
+                const allDevs = Object.values(global.devices || {}).sort((a, b) => b.lastSeen - a.lastSeen);
+                // Buscar la placa vinculada a este chatId o la más recientemente activa
                 const userDev = allDevs.find(d => d.chatId == chatId) || allDevs[0];
 
                 if (!userDev) {
