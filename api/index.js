@@ -45,19 +45,60 @@ app.post('/api/ping', (req, res) => {
     });
 });
 
-// 2. ENDPOINT WEBHOOK PARA RESPONDER AUTOMÁTICAMENTE EL CHAT ID EN TELEGRAM
+// 2. ENDPOINT WEBHOOK PARA RESPONDER COMANDOS Y CHAT ID EN TELEGRAM
 app.post('/api/telegram-webhook', (req, res) => {
     try {
         const update = req.body;
         if (update && update.message && update.message.chat) {
             const chatId = update.message.chat.id;
+            const text = (update.message.text || '').toLowerCase().trim();
             const senderName = update.message.from ? (update.message.from.first_name || 'Usuario') : 'Usuario';
             const botToken = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 
-            const replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                             `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
-                             `👉 <code>${chatId}</code>\n\n` +
-                             `📱 <i>Copia este número y pégalo en la casilla de Telegram al configurar la red 'Configurar-Luz' de tu dispositivo.</i>`;
+            let replyMsg = "";
+
+            // SI EL USUARIO SOLICITA EL COMANDO /estado
+            if (text.includes('/estado') || text.includes('estado')) {
+                const now = Date.now();
+                // Buscar dispositivos asociados o activos
+                const allDevs = Object.values(global.devices || {});
+                const userDev = allDevs.find(d => d.chatId == chatId) || allDevs[0];
+
+                if (!userDev) {
+                    replyMsg = `⚠️ <b>No hay dispositivos registrados aún.</b>\n\nAsegúrate de que tu placa haya enviado al menos un reporte a Vercel.`;
+                } else {
+                    const elapsedMs = now - userDev.lastSeen;
+                    const isOnline = elapsedMs < 80000; // Menos de 80 segundos
+                    const elapsedSecs = Math.floor(elapsedMs / 1000);
+
+                    if (isOnline) {
+                        const uptimeMs = now - (userDev.onlineSince || userDev.lastSeen);
+                        const hours = Math.floor(uptimeMs / 3600000);
+                        const mins = Math.floor((uptimeMs % 3600000) / 60000);
+                        const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+                        replyMsg = `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
+                                   `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
+                                   `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
+                                   `📡 <b>Último reporte:</b> Hace ${elapsedSecs} segundos\n\n` +
+                                   `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                    } else {
+                        const elapsedMins = Math.floor(elapsedMs / 60000);
+                        replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
+                                   `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
+                                   `📡 <b>Último reporte:</b> Hace ${elapsedMins} minutos\n` +
+                                   `⚠️ <i>La placa no ha enviado avisos en los últimos 80 segundos.</i>\n\n` +
+                                   `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                    }
+                }
+            } else {
+                // MENSAJE DE BIENVENIDA CON CHAT ID
+                replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
+                           `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
+                           `👉 <code>${chatId}</code>\n\n` +
+                           `📱 <i>Copia este número y pégalo en la casilla de Telegram al configurar tu dispositivo.</i>\n\n` +
+                           `💡 <i>Escribe <b>/estado</b> en cualquier momento para consultar si hay luz en tu casa.</i>`;
+            }
 
             const https = require('https');
             const payload = JSON.stringify({
