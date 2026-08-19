@@ -49,6 +49,22 @@ app.post('/api/ping', (req, res) => {
 app.post('/api/telegram-webhook', (req, res) => {
     try {
         const update = req.body;
+        
+        // Manejar toque en botones táctiles (callback_query)
+        if (update && update.callback_query) {
+            const callback = update.callback_query;
+            const chatId = callback.message.chat.id;
+            const action = callback.data;
+            const senderName = callback.from ? (callback.from.first_name || 'Usuario') : 'Usuario';
+            
+            // Simular mensaje con la acción del botón
+            update.message = {
+                chat: { id: chatId },
+                from: { first_name: senderName },
+                text: action
+            };
+        }
+
         if (update && update.message && update.message.chat) {
             const chatId = update.message.chat.id;
             const text = (update.message.text || '').toLowerCase().trim();
@@ -100,11 +116,24 @@ app.post('/api/telegram-webhook', (req, res) => {
                            `💡 <i>Escribe <b>/estado</b> en cualquier momento para consultar si hay luz en tu casa.</i>`;
             }
 
+            // Botones táctiles interactivos dentro del chat de Telegram
+            const replyMarkup = {
+                inline_keyboard: [
+                    [
+                        { text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }
+                    ],
+                    [
+                        { text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }
+                    ]
+                ]
+            };
+
             const https = require('https');
             const payload = JSON.stringify({
                 chat_id: chatId,
                 text: replyMsg,
-                parse_mode: 'HTML'
+                parse_mode: 'HTML',
+                reply_markup: replyMarkup
             });
 
             const options = {
