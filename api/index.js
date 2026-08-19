@@ -96,11 +96,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             // SI EL USUARIO SOLICITA EL COMANDO /clima O /tiempo
             if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
-                const allDevs = Object.values(global.devices || {});
-                const userDev = allDevs.find(d => d.chatId == chatId) || allDevs[0];
+                const allDevs = Object.values(global.devices || {}).sort((a, b) => b.lastSeen - a.lastSeen);
+                const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
 
                 try {
-                    // Diccionario de ciudades principales de Venezuela
                     const VENEZUELA_CITIES = {
                         'maracay': { name: 'Maracay, Aragua', lat: 10.2469, lon: -67.5958 },
                         'caracas': { name: 'Caracas, Distrito Capital', lat: 10.4880, lon: -66.8791 },
@@ -111,8 +110,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                         'merida': { name: 'Mérida, Mérida', lat: 8.5983, lon: -71.1450 }
                     };
 
-                    // Detectar si el usuario especificó ciudad (ej. /clima valencia)
-                    let selectedCity = VENEZUELA_CITIES['maracay']; // Maracay por defecto
+                    let selectedCity = VENEZUELA_CITIES['maracay'];
                     for (const [key, cityInfo] of Object.entries(VENEZUELA_CITIES)) {
                         if (text.includes(key)) {
                             selectedCity = cityInfo;
@@ -155,17 +153,16 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     global.devices[userDev.deviceId].resetRequested = true;
                     replyMsg = `🔄 <b>Orden de reinicio enviada a:</b> <code>${userDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`;
                 } else {
-                    replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nVerifica que tu placa esté enviando reportes a Vercel.`;
+                    replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
                 }
             } else if (text.includes('/estado') || text.includes('estado')) {
                 const now = Date.now();
-                // Ordenar dispositivos por el más recientemente activo (lastSeen)
                 const allDevs = Object.values(global.devices || {}).sort((a, b) => b.lastSeen - a.lastSeen);
-                // Buscar la placa vinculada a este chatId o la más recientemente activa
-                const userDev = allDevs.find(d => d.chatId == chatId) || allDevs[0];
+                // Buscar estricto por chatId vinculado o la única placa si hay solo 1
+                const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
 
                 if (!userDev) {
-                    replyMsg = `⚠️ <b>No hay dispositivos registrados aún.</b>\n\nAsegúrate de que tu placa haya enviado al menos un reporte a Vercel.`;
+                    replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo en la casilla de Telegram al configurar la red de tu placa.`;
                 } else {
                     const elapsedMs = now - userDev.lastSeen;
                     const isOnline = elapsedMs < 80000; // Menos de 80 segundos
