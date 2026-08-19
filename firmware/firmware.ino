@@ -253,7 +253,7 @@ void setup() {
     WiFi.begin(ssid.c_str(), password.c_str());
 
     int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 40) {
+    while (WiFi.status() != WL_CONNECTED && tries < 360) { // 3 minutos
       delay(500);
       if (tries % 4 == 0) {
         digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
