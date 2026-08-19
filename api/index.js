@@ -136,6 +136,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
                     const now = Date.now();
                     const isOnline = userDev ? ((now - userDev.lastSeen) < 80000) : true;
+                    const devId = userDev ? userDev.deviceId : 'ESP-7A562F';
 
                     replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN VIVO</b>\n\n` +
                                `📍 <b>Ubicación:</b> ${selectedCity.name}\n` +
@@ -145,7 +146,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `⚡ <b>Estado Eléctrico:</b> ${isOnline ? 'HAY LUZ 🟢' : 'SE FUE LA LUZ 🔴'}\n\n` +
                                `💡 <i>Puedes consultar otra ciudad escribiendo por ejemplo: <b>/clima valencia</b></i>`;
                 } catch (e) {
-                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN MARACAY</b>\n\n📍 <b>Ubicación:</b> Maracay, Aragua\n🌡️ <b>Temperatura aproximada:</b> 26 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
+                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN MARACAY</b>\n\n📍 <b>Ubicación:</b> Maracay, Aragua\n🌡️ <b>Temperatura aproximada:</b> 25 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
                 }
             } else if (text.includes('/reiniciar')) {
                 const allDevs = Object.values(global.devices || {});
