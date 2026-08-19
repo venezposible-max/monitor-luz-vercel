@@ -46,7 +46,7 @@ app.post('/api/ping', (req, res) => {
 });
 
 // 2. ENDPOINT WEBHOOK PARA RESPONDER COMANDOS Y CHAT ID EN TELEGRAM
-app.post('/api/telegram-webhook', (req, res) => {
+app.post('/api/telegram-webhook', async (req, res) => {
     try {
         const update = req.body;
         
