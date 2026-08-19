@@ -1,0 +1,13 @@
+{
+  "name": "monitor-luz-vercel",
+  "version": "1.0.0",
+  "description": "Sistema de monitoreo de luz e internet para ESP8266 desplegable en Vercel",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Monitor de Luz e Internet",
+  "short_name": "Monitor Luz",
+  "description": "Detección en tiempo real de energía eléctrica e internet en casa",
+  "start_url": "/?id=ESP-7A562F",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estado de Luz e Internet | Railway</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <!-- Icono de App para Celulares (iOS y Android) -->
+    <link rel="icon" type="image/png" href="/icon.png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Monitor Luz">
+    <meta name="theme-color" content="#10b981">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: rgba(17, 24, 39, 0.85);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            
+            --color-green: #10b981;
+            --color-green-glow: rgba(16, 185, 129, 0.3);
+            --color-red: #ef4444;
+            --color-red-glow: rgba(239, 68, 68, 0.3);
+            --color-yellow: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background-image: 
+                radial-gradient(circle at 50% 20%, rgba(16, 185, 129, 0.06), transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(239, 68, 68, 0.06), transparent 40%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 460px;
+        }
+
+        .header-title {
+            text-align: center;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-sub);
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+
+        /* Glassmorphism Main Status Card */
+        .status-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 28px;
+            padding: 36px 24px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            transition: all 0.4s ease;
+        }
+
+        .indicator-outer {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .indicator-inner {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.8rem;
+            color: #ffffff;
+            transition: all 0.4s ease;
+        }
+
+        @keyframes pulseGlow {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 0.3; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+
+        .pulse-ring {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: 50%;
+            animation: pulseGlow 2.5s infinite ease-in-out;
+        }
+
+        /* STATE: ONLINE (HAY LUZ) */
+        .state-online .indicator-outer { background: var(--color-green-glow); }
+        .state-online .indicator-inner { background: var(--color-green); box-shadow: 0 0 35px var(--color-green); }
+        .state-online .pulse-ring { border: 2px solid var(--color-green); }
+        .state-online .status-badge { color: var(--color-green); }
+
+        /* STATE: OFFLINE (SE FUE LA LUZ) */
+        .state-offline .indicator-outer { background: var(--color-red-glow); }
+        .state-offline .indicator-inner { background: var(--color-red); box-shadow: 0 0 35px var(--color-red); }
+        .state-offline .pulse-ring { border: 2px solid var(--color-red); animation-duration: 1.5s; }
+        .state-offline .status-badge { color: var(--color-red); }
+
+        /* STATE: UNKNOWN */
+        .state-loading .indicator-inner { background: var(--color-yellow); }
+
+        .status-badge {
+            font-size: 2.3rem;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+
+        .status-message {
+            font-size: 1rem;
+            color: var(--text-sub);
+            line-height: 1.5;
+            margin-bottom: 24px;
+            font-weight: 500;
+        }
+
+        .info-grid {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            text-align: left;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .info-label {
+            font-size: 0.72rem;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .refresh-bar {
+            margin-top: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            padding: 0 4px;
+        }
+
+        .btn-refresh {
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            color: var(--text-main);
+            padding: 8px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .qr-section {
+            margin-top: 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        #qrcode {
+            display: flex;
+            justify-content: center;
+            padding: 12px;
+            background: #ffffff;
+            border-radius: 12px;
+            width: fit-content;
+            margin: 12px auto;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .input-group input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 0.9rem;
+        }
+
+        .input-group button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-title">Monitor de Luz e Internet (Railway)</div>
+
+    <div id="statusCard" class="status-card state-loading">
+        <div class="indicator-outer">
+            <div class="pulse-ring"></div>
+            <div class="indicator-inner" id="statusIcon">⏳</div>
+        </div>
+
+        <div class="status-badge" id="statusBadge">CARGANDO...</div>
+        <div class="status-message" id="statusMessage">Consultando estado...</div>
+
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">ID Dispositivo</span>
+                <span class="info-value" id="deviceIdText">---</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Último Reporte</span>
+                <span class="info-value" id="lastReportText">--:--:--</span>
+            </div>
+            <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 4px;">
+                <span class="info-label" style="color: #10b981; font-weight: 700;">⏱️ Tiempo Continuo con Luz</span>
+                <span class="info-value" id="uptimeText" style="font-size: 1.1rem; color: #ffffff;">--</span>
+            </div>
+        </div>
+
+        <!-- Botón de Reinicio Remoto de WiFi -->
+        <div style="margin-top: 14px;">
+            <button id="btnResetWifi" onclick="requestRemoteReset()" style="width: 100%; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; border-radius: 12px; padding: 10px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                <span>🔄</span> Reiniciar WiFi de la Placa Remotamente
+            </button>
+        </div>
+    </div>
+
+    <div class="refresh-bar">
+        <span id="autoRefreshText">Actualizando en 10s...</span>
+        <button class="btn-refresh" onclick="fetchStatus()">
+            <span>🔄</span> Actualizar
+        </button>
+    </div>
+
+    <div class="qr-section">
+        <h3 style="font-size: 0.95rem; margin-bottom: 8px;">📱 Guardar o Compartir Enlace</h3>
+        <p style="font-size: 0.8rem; color: var(--text-sub);">Escanea este QR o copia el enlace directo a tu monitor:</p>
+        
+        <div id="qrcode"></div>
+
+        <!-- Enlace completo con botón de copiar -->
+        <div style="margin: 14px 0 10px; display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="fullShareUrlInput" readonly style="flex: 1; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px; color: #60a5fa; font-size: 0.82rem; font-family: monospace;" />
+            <button id="copyBtn" onclick="copyShareLink()" style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; color: #60a5fa; border-radius: 10px; padding: 10px 14px; font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 0.82rem; display: flex; align-items: center; gap: 4px;">
+                <span>📋</span> <span id="copyBtnText">Copiar Enlace</span>
+            </button>
+        </div>
+
+        <div class="input-group" style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px;">
+            <input type="text" id="devIdInput" placeholder="Ejemplo: ESP-A1B2C3" />
+            <button onclick="changeDeviceId()">Ver Estado</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentDeviceId = "";
+    let countdownTimer = 10;
+
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    async function init() {
+        const idFromUrl = getQueryParam('id');
+
+        if (idFromUrl && idFromUrl.trim().toUpperCase() !== 'ESP-DEMO12') {
+            currentDeviceId = idFromUrl.trim().toUpperCase();
+        } else {
+            // Consultar a Railway cuál es el dispositivo activo registrado más reciente
+            try {
+                const res = await fetch('/api/devices');
+                const devicesList = await res.json();
+                if (devicesList && devicesList.length > 0) {
+                    currentDeviceId = devicesList[0].deviceId;
+                } else {
+                    currentDeviceId = "ESP-7A562F";
+                }
+            } catch (e) {
+                currentDeviceId = "ESP-7A562F";
+            }
+        }
+
+        document.getElementById('devIdInput').value = currentDeviceId;
+        document.getElementById('deviceIdText').textContent = currentDeviceId;
+
+        generateQRCode();
+        fetchStatus();
+
+        setInterval(fetchStatus, 10000);
+        setInterval(() => {
+            countdownTimer--;
+            if (countdownTimer <= 0) countdownTimer = 10;
+            document.getElementById('autoRefreshText').textContent = `Actualizando en ${countdownTimer}s...`;
+        }, 1000);
+    }
+
+    async function fetchStatus() {
+        if (!currentDeviceId) return;
+        countdownTimer = 10;
+
+        try {
+            const res = await fetch(`/api/status/${currentDeviceId}`);
+            const data = await res.json();
+
+            if (!data.found) {
+                renderState('unknown', 'SIN REPORTES', 'La placa aún no ha enviado su primer aviso a Railway.');
+                return;
+            }
+
+            const lastDate = new Date(data.lastSeen);
+            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            if (data.elapsedMs < 80000) {
+                renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
+
+                // Formatear Tiempo Continuo con Luz
+                const uptimeMs = data.uptimeMs || 0;
+                const totalMins = Math.floor(uptimeMs / 60000);
+                
+                let uptimeFormatted = "";
+                if (totalMins < 1) {
+                    uptimeFormatted = "Menos de 1 minuto";
+                } else if (totalMins < 60) {
+                    uptimeFormatted = `${totalMins} minuto${totalMins === 1 ? '' : 's'}`;
+                } else {
+                    const hours = Math.floor(totalMins / 60);
+                    const mins = totalMins % 60;
+                    if (hours < 24) {
+                        uptimeFormatted = `${hours} hora${hours === 1 ? '' : 's'} y ${mins} min`;
+                    } else {
+                        const days = Math.floor(hours / 24);
+                        const remHours = hours % 24;
+                        uptimeFormatted = `${days} día${days === 1 ? '' : 's'}, ${remHours}h y ${mins}m`;
+                    }
+                }
+                document.getElementById('uptimeText').textContent = uptimeFormatted;
+            } else {
+                const diffMins = Math.floor(data.elapsedMs / 60000);
+                let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
+                renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
+                document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+            }
+        } catch (e) {
+            console.error(e);
+            renderState('unknown', 'ERROR CONEXIÓN', 'No se pudo conectar con el servidor en Railway.');
+        }
+    }
+
+    function renderState(state, title, message) {
+        const card = document.getElementById('statusCard');
+        const icon = document.getElementById('statusIcon');
+        const badge = document.getElementById('statusBadge');
+        const msg = document.getElementById('statusMessage');
+
+        card.className = 'status-card';
+        if (state === 'online') {
+            card.classList.add('state-online');
+            icon.textContent = '⚡';
+        } else if (state === 'offline') {
+            card.classList.add('state-offline');
+            icon.textContent = '🔌';
+        } else {
+            card.classList.add('state-loading');
+            icon.textContent = '❓';
+        }
+        badge.textContent = title;
+        msg.textContent = message;
+    }
+
+    function generateQRCode() {
+        const qrContainer = document.getElementById("qrcode");
+        qrContainer.innerHTML = "";
+        const currentUrl = window.location.origin + window.location.pathname + "?id=" + currentDeviceId;
+
+        // Actualizar el campo de texto con el enlace completo
+        const urlInput = document.getElementById('fullShareUrlInput');
+        if (urlInput) urlInput.value = currentUrl;
+
+        new QRCode(qrContainer, {
+            text: currentUrl,
+            width: 140,
+            height: 140,
+            colorDark : "#090d16",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.H
+        });
+    }
+
+    function copyShareLink() {
+        const urlInput = document.getElementById('fullShareUrlInput');
+        if (!urlInput || !urlInput.value) return;
+
+        urlInput.select();
+        urlInput.setSelectionRange(0, 99999); // Para móviles
+
+        navigator.clipboard.writeText(urlInput.value).then(() => {
+            const btnText = document.getElementById('copyBtnText');
+            const originalText = btnText.textContent;
+            btnText.textContent = "¡COPIADO! ✅";
+            setTimeout(() => {
+                btnText.textContent = originalText;
+            }, 2000);
+        }).catch(err => {
+            console.error('Error al copiar:', err);
+        });
+    }
+
+    async function requestRemoteReset() {
+        if (!currentDeviceId) return;
+
+        const confirmReset = confirm(`¿Estás seguro de que deseas borrar la red WiFi guardada en la placa ${currentDeviceId}?\n\nAl hacerlo, en el próximo reporte (máximo 60 segundos) la placa borrará su memoria y activará la red 'Configurar-Luz' para reconfigurarla.`);
+        if (!confirmReset) return;
+
+        try {
+            const res = await fetch('/api/reset-wifi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: currentDeviceId })
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                alert("✅ Orden de reinicio enviada a la placa.\nEn su próximo reporte (máximo 60 segundos), la placa borrará su memoria WiFi y activará la red 'Configurar-Luz'.");
+            } else {
+                alert("⚠️ " + (data.error || "No se pudo enviar la orden. Asegúrate de que la placa haya enviado al menos un reporte a Railway."));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("⚠️ Error al conectar con el servidor.");
+        }
+    }
+
+    function changeDeviceId() {
+        const inputVal = document.getElementById('devIdInput').value.trim().toUpperCase();
+        if (!inputVal) return;
+        currentDeviceId = inputVal;
+        document.getElementById('deviceIdText').textContent = currentDeviceId;
+        const newUrl = window.location.pathname + '?id=' + currentDeviceId;
+        window.history.pushState({path: newUrl}, '', newUrl);
+        generateQRCode();
+        fetchStatus();
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
