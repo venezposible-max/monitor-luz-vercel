@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const https = require('https');
 
 const app = express();
 
@@ -11,6 +12,8 @@ app.use(express.urlencoded({ extended: true }));
 global.devices = global.devices || {};
 global.persistentStore = global.persistentStore || {};
 
+const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
+
 function persistDevice(deviceId, data) {
     global.persistentStore[deviceId] = {
         ...data,
@@ -20,6 +23,70 @@ function persistDevice(deviceId, data) {
 
 function getDevice(deviceId) {
     return global.devices[deviceId] || global.persistentStore[deviceId] || null;
+}
+
+// Función para enviar mensajes de Telegram de forma asíncrona
+function sendTelegramMessage(chatId, text) {
+    if (!chatId) return;
+    try {
+        const payload = JSON.stringify({
+            chat_id: chatId,
+            text: text,
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
+                    [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
+                ]
+            }
+        });
+
+        const options = {
+            hostname: 'api.telegram.org',
+            path: `/bot${BOT_TOKEN}/sendMessage`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        };
+
+        const request = https.request(options);
+        request.write(payload);
+        request.end();
+    } catch (e) {
+        console.error('Error enviando Telegram:', e);
+    }
+}
+
+// Comprobador de cortes de luz automático
+function checkBlackoutAlerts() {
+    const now = Date.now();
+    const combined = { ...global.persistentStore, ...global.devices };
+
+    for (const dev of Object.values(combined)) {
+        if (!dev.lastSeen) continue;
+        const elapsedMs = now - dev.lastSeen;
+
+        // Si han pasado más de 80 segundos sin señal y no se ha notificado la ida de luz
+        if (elapsedMs >= 80000 && !dev.blackoutNotified && dev.chatId) {
+            dev.blackoutNotified = true;
+            if (global.devices[dev.deviceId]) global.devices[dev.deviceId].blackoutNotified = true;
+            if (global.persistentStore[dev.deviceId]) global.persistentStore[dev.deviceId].blackoutNotified = true;
+
+            const cutoffTime = new Date(dev.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            const alertMsg = `🔴 <b>¡ALERTA! SE ACABA DE IR LA LUZ 🔌</b>\n\n` +
+                             `⏰ <b>Hora aproximada de corte:</b> ${cutoffTime}\n\n` +
+                             `Tu dispositivo ha dejado de transmitir señal por corte de energía eléctrica en tu casa.\n\n` +
+                             `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
+                             `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
+
+            console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${dev.chatId} para ${dev.deviceId}`);
+            sendTelegramMessage(dev.chatId, alertMsg);
+        }
+    }
 }
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
@@ -43,6 +110,7 @@ app.post('/api/ping', (req, res) => {
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: chatId || (existing.chatId || ''),
+        blackoutNotified: false, // Resetear bandera al volver la señal
         resetRequested: false,
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
@@ -52,6 +120,10 @@ app.post('/api/ping', (req, res) => {
     persistDevice(deviceId, devData);
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
+
+    // Ejecutar chequeo de alertas
+    checkBlackoutAlerts();
+
     return res.json({ 
         success: true, 
         message: 'Ping recibido', 
@@ -62,7 +134,7 @@ app.post('/api/ping', (req, res) => {
     });
 });
 
-// 2. ENDPOINT WEBHOOK CON RESPUESTA DIRECTA Y CERO LATENCIA (POST /api/telegram-webhook)
+// 2. ENDPOINT WEBHOOK CON RESPUESTA DIRECTA ULTRA-RÁPIDA (POST /api/telegram-webhook)
 app.post('/api/telegram-webhook', (req, res) => {
     try {
         const update = req.body;
@@ -83,6 +155,9 @@ app.post('/api/telegram-webhook', (req, res) => {
         if (!chatId) {
             return res.status(200).send('OK');
         }
+
+        // Ejecutar chequeo de alertas
+        checkBlackoutAlerts();
 
         let replyMsg = "";
 
@@ -168,7 +243,6 @@ app.post('/api/telegram-webhook', (req, res) => {
                        `💡 <i>Escribe <b>/estado</b> en cualquier momento para consultar si hay luz en tu casa.</i>`;
         }
 
-        // RESPUESTA DIRECTA ULTRA-RÁPIDA (0.05 SEGUNDOS, CERO CONEXIONES EXTRA)
         return res.status(200).json({
             method: 'sendMessage',
             chat_id: chatId,
@@ -205,6 +279,7 @@ app.post('/api/reset-wifi', (req, res) => {
 
 // 4. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
 app.get('/api/devices', (req, res) => {
+    checkBlackoutAlerts();
     const combined = { ...global.persistentStore, ...global.devices };
     const list = Object.values(combined).sort((a, b) => b.lastSeen - a.lastSeen);
     return res.json(list);
@@ -212,6 +287,7 @@ app.get('/api/devices', (req, res) => {
 
 // 5. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
 app.get('/api/status/:id', (req, res) => {
+    checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
     const device = getDevice(deviceId);
 
