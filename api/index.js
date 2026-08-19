@@ -171,10 +171,18 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else if (text.includes('/estado') || text.includes('estado')) {
                 const now = Date.now();
                 const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
-                const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
+                
+                // Buscar por chatId o auto-vincular la placa activa más reciente
+                let userDev = allDevs.find(d => d.chatId == chatId);
+                if (!userDev && allDevs.length > 0) {
+                    userDev = allDevs[0]; // Vincular automáticamente la placa activa
+                    userDev.chatId = chatId;
+                    if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].chatId = chatId;
+                    if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].chatId = chatId;
+                }
 
                 if (!userDev) {
-                    replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo en la casilla de Telegram al configurar la red de tu placa.`;
+                    replyMsg = `⚠️ <b>Dispositivo no registrado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresar tu equipo a la red WiFi.`;
                 } else {
                     const elapsedMs = now - userDev.lastSeen;
                     const isOnline = elapsedMs < 80000;
