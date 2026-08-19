@@ -363,7 +363,9 @@
             const data = await res.json();
 
             if (!data.found) {
-                renderState('unknown', 'SIN REPORTES', 'La placa aún no ha enviado su primer aviso a Railway.');
+                renderState('offline', 'SE FUE LA LUZ 🔴', 'La placa está desconectada o se interrumpió la energía eléctrica.');
+                document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+                document.getElementById('lastReportText').textContent = "--:--:--";
                 return;
             }
 
