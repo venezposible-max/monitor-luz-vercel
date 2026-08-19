@@ -56,7 +56,25 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const chatId = callback.message.chat.id;
             const action = callback.data;
             const senderName = callback.from ? (callback.from.first_name || 'Usuario') : 'Usuario';
-            
+            const botToken = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
+
+            // Responder a Telegram inmediatamente para quitar el reloj de espera del botón
+            try {
+                const https = require('https');
+                const cbPayload = JSON.stringify({ callback_query_id: callback.id });
+                const cbReq = https.request({
+                    hostname: 'api.telegram.org',
+                    path: `/bot${botToken}/answerCallbackQuery`,
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(cbPayload)
+                    }
+                });
+                cbReq.write(cbPayload);
+                cbReq.end();
+            } catch (e) {}
+
             // Simular mensaje con la acción del botón
             update.message = {
                 chat: { id: chatId },
