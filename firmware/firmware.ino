@@ -1,7 +1,7 @@
 /*
   =============================================================================
-  PROYECTO: Monitor de Luz e Internet (ESP8266 -> Servidor Railway/Vercel)
-  VERSIÓN: Portal Cautivo con Telegram Opcional + Notificación al Volver la Luz
+  PROYECTO: Monitor de Luz e Internet (ESP8266 -> Servidor Vercel)
+  VERSIÓN: Pantalla con Botón de Copiar Enlace + Notificaciones Telegram
   =============================================================================
 */
 
@@ -164,18 +164,18 @@ void handleSave() {
                            ".card{background:#161b22;padding:24px;border-radius:16px;max-width:340px;margin:auto;border:1px solid #30363d}"
                            "input{width:100%;padding:12px;margin:12px 0;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#60a5fa;box-sizing:border-box;font-family:monospace;font-size:0.85rem;text-align:center}"
                            "button{width:100%;padding:14px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:1rem}</style>"
-                           "<script>function copyUrl(){var copyText=document.getElementById('u');copyText.select();copyText.setSelectionRange(0,99999);navigator.clipboard.writeText(copyText.value);document.getElementById('b').textContent='¡COPIADO! ✅';}</script>"
+                           "<script>function copyUrl(){var copyText=document.getElementById('u');copyText.select();copyText.setSelectionRange(0,99999);navigator.clipboard.writeText(copyText.value);document.getElementById('b').textContent='¡ENLACE COPIADO! ✅';}</script>"
                            "</head><body><div class='card'>"
                            "<h2 style='color:#10b981'>¡Clave Correcta! 🎉</h2>"
                            "<p style='color:#10b981;font-weight:bold;'>Dispositivo: " + deviceId + "</p>"
-                           "<p style='color:#8b949e;font-size:0.85rem'>Este es tu enlace único de monitoreo. Toca el botón para copiarlo:</p>"
+                           "<p style='color:#8b949e;font-size:0.85rem'>Este es tu enlace único de monitoreo. Cópialo o guárdalo ahora:</p>"
                            "<input type='text' id='u' value='" + myUrl + "' readonly>"
                            "<button id='b' onclick='copyUrl()'>📋 COPIAR ENLACE</button>"
-                           "<p style='color:#e5c07b;font-size:0.8rem;margin-top:16px'>La placa ya está conectada y monitoreando.</p>"
+                           "<p style='color:#e5c07b;font-size:0.8rem;margin-top:16px'>La placa se conectará a '" + testSsid + "' en unos segundos...</p>"
                            "</div></body></html>";
 
       webServer.send(200, "text/html", successHtml);
-      delay(4000);
+      delay(6000);
       ESP.restart();
     } else {
       WiFi.disconnect();
@@ -307,7 +307,7 @@ void setup() {
       EEPROM.commit();
 
       if (telegramChatId.length() > 0) {
-        String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n"
+        String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n"
                           "La energía eléctrica ha regresado a tu casa.\n\n"
                           "📱 <b>Dispositivo:</b> " + deviceId + "\n"
                           "🔗 <b>Monitor:</b> " + String(RAILWAY_SERVER_URL) + "/?id=" + deviceId;
