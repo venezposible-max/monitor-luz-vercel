@@ -194,6 +194,10 @@ void handleSave() {
   }
 }
 
+void handleCaptivePortal() {
+  handleRoot();
+}
+
 void startConfigPortal() {
   configMode = true;
   WiFi.disconnect();
@@ -206,6 +210,11 @@ void startConfigPortal() {
 
   webServer.on("/", handleRoot);
   webServer.on("/save", handleSave);
+  webServer.on("/hotspot-detect.html", handleCaptivePortal);
+  webServer.on("/library/test/success.html", handleCaptivePortal);
+  webServer.on("/generate_204", handleCaptivePortal);
+  webServer.on("/gen_204", handleCaptivePortal);
+  webServer.on("/nui", handleCaptivePortal);
   webServer.onNotFound(handleRoot);
   webServer.begin();
 }
