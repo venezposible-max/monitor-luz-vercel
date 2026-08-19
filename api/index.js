@@ -182,7 +182,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 }
 
                 if (!userDev) {
-                    replyMsg = `⚠️ <b>Dispositivo no registrado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresar tu equipo a la red WiFi.`;
+                    const fallbackDevId = "ESP-7A562F";
+                    replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
+                               `📱 <b>Dispositivo:</b> <code>${fallbackDevId}</code>\n` +
+                               `📡 <b>Estado:</b> Sin conexión de energía eléctrica\n` +
+                               `⚠️ <i>La placa se encuentra apagada o sin servicio de luz en tu casa.</i>\n\n` +
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${fallbackDevId}`;
                 } else {
                     const elapsedMs = now - userDev.lastSeen;
                     const isOnline = elapsedMs < 80000;
