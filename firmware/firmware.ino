@@ -1,7 +1,7 @@
 /*
   =============================================================================
   PROYECTO: Monitor de Luz e Internet (ESP8266 -> Servidor Vercel)
-  VERSIÓN: Pantalla con Botón de Copiar Enlace + Notificaciones Telegram
+  VERSIÓN: Copiar Enlace en 1 Solo Clic + Hora Exacta en Telegram
   =============================================================================
 */
 
@@ -11,6 +11,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <time.h>
 
 const char* RAILWAY_SERVER_URL = "https://monitor-luz-vercel.vercel.app";
 const char* TELEGRAM_BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38"; 
@@ -164,11 +165,21 @@ void handleSave() {
                            ".card{background:#161b22;padding:24px;border-radius:16px;max-width:340px;margin:auto;border:1px solid #30363d}"
                            "input{width:100%;padding:12px;margin:12px 0;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#60a5fa;box-sizing:border-box;font-family:monospace;font-size:0.85rem;text-align:center}"
                            "button{width:100%;padding:14px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:1rem}</style>"
-                           "<script>function copyUrl(){var copyText=document.getElementById('u');copyText.select();copyText.setSelectionRange(0,99999);navigator.clipboard.writeText(copyText.value);document.getElementById('b').textContent='¡ENLACE COPIADO! ✅';}</script>"
+                           "<script>"
+                           "function copyUrl(){"
+                           "  var urlInput = document.getElementById('u');"
+                           "  urlInput.select();"
+                           "  urlInput.setSelectionRange(0, 99999);"
+                           "  navigator.clipboard.writeText(urlInput.value);"
+                           "  var b = document.getElementById('b');"
+                           "  b.style.background='#10b981';"
+                           "  b.textContent='¡ENLACE COPIADO! ✅';"
+                           "}"
+                           "</script>"
                            "</head><body><div class='card'>"
                            "<h2 style='color:#10b981'>¡Clave Correcta! 🎉</h2>"
                            "<p style='color:#10b981;font-weight:bold;'>Dispositivo: " + deviceId + "</p>"
-                           "<p style='color:#8b949e;font-size:0.85rem'>Este es tu enlace único de monitoreo. Cópialo o guárdalo ahora:</p>"
+                           "<p style='color:#8b949e;font-size:0.85rem'>Toca el botón azul para copiar tu enlace único al portapapeles:</p>"
                            "<input type='text' id='u' value='" + myUrl + "' readonly>"
                            "<button id='b' onclick='copyUrl()'>📋 COPIAR ENLACE</button>"
                            "<p style='color:#e5c07b;font-size:0.8rem;margin-top:16px'>La placa se conectará a '" + testSsid + "' en unos segundos...</p>"
@@ -306,8 +317,27 @@ void setup() {
       EEPROM.write(90, 0);
       EEPROM.commit();
 
+      configTime(-4 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+      int ntpTries = 0;
+      while (time(nullptr) < 100000 && ntpTries < 10) {
+        delay(300);
+        ntpTries++;
+      }
+
+      time_t now = time(nullptr);
+      struct tm* timeinfo = localtime(&now);
+      char timeBuffer[20];
+      strftime(timeBuffer, sizeof(timeBuffer), "%I:%M %p", timeinfo);
+      String formattedTime = String(timeBuffer);
+      formattedTime.trim();
+
+      if (formattedTime.length() == 0 || formattedTime == "12:00 AM") {
+        formattedTime = "Reciente";
+      }
+
       if (telegramChatId.length() > 0) {
-        String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n"
+        String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n"
+                          "⏰ <b>Hora de regreso:</b> " + formattedTime + "\n\n"
                           "La energía eléctrica ha regresado a tu casa.\n\n"
                           "📱 <b>Dispositivo:</b> " + deviceId + "\n"
                           "🔗 <b>Monitor:</b> " + String(RAILWAY_SERVER_URL) + "/?id=" + deviceId;
