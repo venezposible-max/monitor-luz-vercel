@@ -13,7 +13,7 @@
 #include <WiFiClientSecure.h>
 
 const char* RAILWAY_SERVER_URL = "https://monitor-luz-vercel.vercel.app";
-const char* TELEGRAM_BOT_TOKEN = "7864816301:AAH8rYp61u58jW4yvXn7V2Z3R8m0KqL1sP0"; 
+const char* TELEGRAM_BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38"; 
 
 #define EEPROM_SIZE 160
 const byte DNS_PORT = 53;
