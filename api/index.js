@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const https = require('https');
 
 const app = express();
 
@@ -9,11 +10,25 @@ app.use(express.urlencoded({ extended: true }));
 
 // Memoria compartida en la función serverless de Vercel
 global.devices = global.devices || {};
+global.persistentStore = global.persistentStore || {};
+
+// Auxiliar para guardar la persistencia del último reporte de cada placa
+function persistDevice(deviceId, data) {
+    global.persistentStore[deviceId] = {
+        ...data,
+        updatedAt: Date.now()
+    };
+}
+
+function getDevice(deviceId) {
+    return global.devices[deviceId] || global.persistentStore[deviceId] || null;
+}
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', (req, res) => {
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
+    const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
 
     if (!deviceId) {
         return res.status(400).json({ error: 'Falta el parámetro deviceId' });
@@ -22,12 +37,10 @@ app.post('/api/ping', (req, res) => {
     const now = Date.now();
     const onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
 
-    const existing = global.devices[deviceId] || {};
+    const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
 
-    const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
-
-    global.devices[deviceId] = {
+    const devData = {
         deviceId: deviceId,
         lastSeen: now,
         onlineSince: onlineSince,
@@ -36,6 +49,9 @@ app.post('/api/ping', (req, res) => {
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
     };
+
+    global.devices[deviceId] = devData;
+    persistDevice(deviceId, devData);
 
     console.log(`[PING] Dispositivo ${deviceId} activo en Vercel.`);
     return res.json({ 
@@ -61,9 +77,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const senderName = callback.from ? (callback.from.first_name || 'Usuario') : 'Usuario';
             const botToken = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 
-            // Responder a Telegram inmediatamente para quitar el reloj de espera del botón
             try {
-                const https = require('https');
                 const cbPayload = JSON.stringify({ callback_query_id: callback.id });
                 const cbReq = https.request({
                     hostname: 'api.telegram.org',
@@ -78,7 +92,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 cbReq.end();
             } catch (e) {}
 
-            // Simular mensaje con la acción del botón
             update.message = {
                 chat: { id: chatId },
                 from: { first_name: senderName },
@@ -94,9 +107,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             let replyMsg = "";
 
-            // SI EL USUARIO SOLICITA EL COMANDO /clima O /tiempo
             if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
-                const allDevs = Object.values(global.devices || {}).sort((a, b) => b.lastSeen - a.lastSeen);
+                const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
                 const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
 
                 try {
@@ -147,25 +159,25 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN MARACAY</b>\n\n📍 <b>Ubicación:</b> Maracay, Aragua\n🌡️ <b>Temperatura aproximada:</b> 25 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
                 }
             } else if (text.includes('/reiniciar')) {
-                const allDevs = Object.values(global.devices || {});
+                const allDevs = Object.values({ ...global.persistentStore, ...global.devices });
                 const userDev = allDevs.find(d => d.chatId == chatId);
                 if (userDev) {
-                    global.devices[userDev.deviceId].resetRequested = true;
+                    if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].resetRequested = true;
+                    if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].resetRequested = true;
                     replyMsg = `🔄 <b>Orden de reinicio enviada a:</b> <code>${userDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`;
                 } else {
                     replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
                 }
             } else if (text.includes('/estado') || text.includes('estado')) {
                 const now = Date.now();
-                const allDevs = Object.values(global.devices || {}).sort((a, b) => b.lastSeen - a.lastSeen);
-                // Buscar estricto por chatId vinculado o la única placa si hay solo 1
+                const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
                 const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
 
                 if (!userDev) {
                     replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo en la casilla de Telegram al configurar la red de tu placa.`;
                 } else {
                     const elapsedMs = now - userDev.lastSeen;
-                    const isOnline = elapsedMs < 80000; // Menos de 80 segundos
+                    const isOnline = elapsedMs < 80000;
                     const elapsedSecs = Math.floor(elapsedMs / 1000);
 
                     if (isOnline) {
@@ -184,12 +196,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                         replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
                                    `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
                                    `📡 <b>Último reporte:</b> Hace ${elapsedMins} minutos\n` +
-                                   `⚠️ <i>La placa no ha enviado avisos en los últimos 80 segundos.</i>\n\n` +
+                                   `⚠️ <i>La placa dejó de responder a las ${new Date(userDev.lastSeen).toLocaleTimeString('es-VE')}.</i>\n\n` +
                                    `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                     }
                 }
             } else {
-                // MENSAJE DE BIENVENIDA CON CHAT ID
                 replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
                            `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
                            `👉 <code>${chatId}</code>\n\n` +
@@ -197,7 +208,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
                            `💡 <i>Escribe <b>/estado</b> en cualquier momento para consultar si hay luz en tu casa.</i>`;
             }
 
-            // Botones táctiles interactivos dentro del chat de Telegram
             const replyMarkup = {
                 inline_keyboard: [
                     [
@@ -212,7 +222,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 ]
             };
 
-            const https = require('https');
             const payload = JSON.stringify({
                 chat_id: chatId,
                 text: replyMsg,
@@ -243,27 +252,30 @@ app.post('/api/telegram-webhook', async (req, res) => {
 // 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
 app.post('/api/reset-wifi', (req, res) => {
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const device = getDevice(deviceId);
 
-    if (!deviceId || !global.devices[deviceId]) {
+    if (!deviceId || !device) {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
-    global.devices[deviceId].resetRequested = true;
+    if (global.devices[deviceId]) global.devices[deviceId].resetRequested = true;
+    if (global.persistentStore[deviceId]) global.persistentStore[deviceId].resetRequested = true;
 
     console.log(`[ORDEN] Solicitud de reinicio de WiFi registrada en Vercel para ${deviceId}`);
     return res.json({ success: true, message: 'Orden de reinicio registrada.' });
 });
 
-// 3. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
+// 4. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
 app.get('/api/devices', (req, res) => {
-    const list = Object.values(global.devices).sort((a, b) => b.lastSeen - a.lastSeen);
+    const combined = { ...global.persistentStore, ...global.devices };
+    const list = Object.values(combined).sort((a, b) => b.lastSeen - a.lastSeen);
     return res.json(list);
 });
 
-// 4. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
+// 5. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
 app.get('/api/status/:id', (req, res) => {
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
-    const device = global.devices[deviceId];
+    const device = getDevice(deviceId);
 
     if (!device) {
         return res.json({
@@ -276,7 +288,7 @@ app.get('/api/status/:id', (req, res) => {
 
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 80000; // Menos de 80 segundos
+    const isOnline = elapsedMs < 80000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     return res.json({
