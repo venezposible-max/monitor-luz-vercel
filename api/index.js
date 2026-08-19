@@ -206,10 +206,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                    `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                     } else {
                         const elapsedMins = Math.floor(elapsedMs / 60000);
+                        const lastTimeStr = new Date(userDev.lastSeen).toLocaleTimeString();
                         replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
                                    `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
                                    `📡 <b>Último reporte:</b> Hace ${elapsedMins} minutos\n` +
-                                   `⚠️ <i>La placa dejó de responder a las ${new Date(userDev.lastSeen).toLocaleTimeString('es-VE')}.</i>\n\n` +
+                                   `⚠️ <i>La placa dejó de responder a las ${lastTimeStr}.</i>\n\n` +
                                    `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                     }
                 }
