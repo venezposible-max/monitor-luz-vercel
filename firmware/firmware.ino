@@ -12,7 +12,7 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
 
-const char* RAILWAY_SERVER_URL = "https://monitor-luz-production.up.railway.app";
+const char* RAILWAY_SERVER_URL = "https://monitor-luz-vercel.vercel.app";
 
 #define EEPROM_SIZE 96
 const byte DNS_PORT = 53;
