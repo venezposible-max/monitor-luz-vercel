@@ -79,12 +79,27 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 const userDev = allDevs.find(d => d.chatId == chatId) || allDevs[0];
 
                 try {
-                    // Obtener datos del clima vía Open-Meteo API (por defecto Caracas: lat 10.488, lon -66.879)
-                    let lat = 10.488;
-                    let lon = -66.879;
-                    let cityName = "Caracas";
+                    // Diccionario de ciudades principales de Venezuela
+                    const VENEZUELA_CITIES = {
+                        'maracay': { name: 'Maracay, Aragua', lat: 10.2469, lon: -67.5958 },
+                        'caracas': { name: 'Caracas, Distrito Capital', lat: 10.4880, lon: -66.8791 },
+                        'valencia': { name: 'Valencia, Carabobo', lat: 10.1620, lon: -67.9966 },
+                        'maracaibo': { name: 'Maracaibo, Zulia', lat: 10.6427, lon: -71.6125 },
+                        'barquisimeto': { name: 'Barquisimeto, Lara', lat: 10.0647, lon: -69.3570 },
+                        'san cristobal': { name: 'San Cristóbal, Táchira', lat: 7.7669, lon: -72.2250 },
+                        'merida': { name: 'Mérida, Mérida', lat: 8.5983, lon: -71.1450 }
+                    };
 
-                    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+                    // Detectar si el usuario especificó ciudad (ej. /clima valencia)
+                    let selectedCity = VENEZUELA_CITIES['maracay']; // Maracay por defecto
+                    for (const [key, cityInfo] of Object.entries(VENEZUELA_CITIES)) {
+                        if (text.includes(key)) {
+                            selectedCity = cityInfo;
+                            break;
+                        }
+                    }
+
+                    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${selectedCity.lat}&longitude=${selectedCity.lon}&current_weather=true`);
                     const weatherData = await weatherRes.json();
                     const current = weatherData.current_weather || {};
 
@@ -101,14 +116,15 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     const now = Date.now();
                     const isOnline = userDev ? ((now - userDev.lastSeen) < 80000) : true;
 
-                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA (Zona de tu Monitor)</b>\n\n` +
-                               `📍 <b>Ubicación estimada:</b> ${cityName}\n` +
+                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN VIVO</b>\n\n` +
+                               `📍 <b>Ubicación:</b> ${selectedCity.name}\n` +
                                `🌡️ <b>Temperatura:</b> ${temp} °C\n` +
                                `☁️ <b>Estado del cielo:</b> ${weatherText}\n` +
                                `💨 <b>Viento:</b> ${wind} km/h\n\n` +
-                               `⚡ <b>Estado Eléctrico:</b> ${isOnline ? 'HAY LUZ 🟢' : 'SE FUE LA LUZ 🔴'}`;
+                               `⚡ <b>Estado Eléctrico:</b> ${isOnline ? 'HAY LUZ 🟢' : 'SE FUE LA LUZ 🔴'}\n\n` +
+                               `💡 <i>Puedes consultar otra ciudad escribiendo por ejemplo: <b>/clima valencia</b></i>`;
                 } catch (e) {
-                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA</b>\n\n🌡️ <b>Temperatura aproximada:</b> 25 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
+                    replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN MARACAY</b>\n\n📍 <b>Ubicación:</b> Maracay, Aragua\n🌡️ <b>Temperatura aproximada:</b> 26 °C\n☁️ <b>Cielo:</b> Parcialmente Nublado\n⚡ <b>Estado Eléctrico:</b> HAY LUZ 🟢`;
                 }
             } else if (text.includes('/estado') || text.includes('estado')) {
                 const now = Date.now();
