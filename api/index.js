@@ -45,7 +45,48 @@ app.post('/api/ping', (req, res) => {
     });
 });
 
-// 2. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
+// 2. ENDPOINT WEBHOOK PARA RESPONDER AUTOMÁTICAMENTE EL CHAT ID EN TELEGRAM
+app.post('/api/telegram-webhook', (req, res) => {
+    try {
+        const update = req.body;
+        if (update && update.message && update.message.chat) {
+            const chatId = update.message.chat.id;
+            const senderName = update.message.from ? (update.message.from.first_name || 'Usuario') : 'Usuario';
+            const botToken = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
+
+            const replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
+                             `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
+                             `👉 <code>${chatId}</code>\n\n` +
+                             `📱 <i>Copia este número y pégalo en la casilla de Telegram al configurar la red 'Configurar-Luz' de tu dispositivo.</i>`;
+
+            const https = require('https');
+            const payload = JSON.stringify({
+                chat_id: chatId,
+                text: replyMsg,
+                parse_mode: 'HTML'
+            });
+
+            const options = {
+                hostname: 'api.telegram.org',
+                path: `/bot${botToken}/sendMessage`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            };
+
+            const request = https.request(options);
+            request.write(payload);
+            request.end();
+        }
+    } catch (e) {
+        console.error('Error Webhook:', e);
+    }
+    return res.status(200).send('OK');
+});
+
+// 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
 app.post('/api/reset-wifi', (req, res) => {
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
 
