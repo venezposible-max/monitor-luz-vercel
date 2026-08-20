@@ -60,7 +60,7 @@ function sendTelegramMessage(chatId, text) {
     }
 }
 
-// Comprobador de cortes de luz automático
+// Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico)
 function checkBlackoutAlerts() {
     const now = Date.now();
     const combined = { ...global.persistentStore, ...global.devices };
@@ -105,9 +105,9 @@ app.post('/api/ping', (req, res) => {
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
     const wasBlackout = existing.blackoutNotified || false;
-    const targetChatId = chatId || existing.chatId || '330749449';
+    const targetChatId = chatId || existing.chatId || '';
 
-    // DOBLE GARANTÍA DE REGRESO DE LUZ: Si estuvo en corte y acaba de reconectarse
+    // NOTIFICACIÓN GENÉRICA AL VOLVER LA LUZ AL CHAT ID ESPECÍFICO DEL CLIENTE
     if (wasBlackout && targetChatId) {
         const returnTime = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
@@ -217,12 +217,7 @@ app.post('/api/telegram-webhook', (req, res) => {
             }
 
             if (!userDev) {
-                const fallbackDevId = "ESP-7A562F";
-                replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
-                           `📱 <b>Dispositivo:</b> <code>${fallbackDevId}</code>\n` +
-                           `📡 <b>Estado:</b> Sin conexión de energía eléctrica\n` +
-                           `⚠️ <i>La placa se encuentra apagada o sin servicio de luz en tu casa.</i>\n\n` +
-                           `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${fallbackDevId}`;
+                replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo en la casilla de Telegram al configurar la red de tu placa.`;
             } else {
                 const elapsedMs = now - userDev.lastSeen;
                 const isOnline = elapsedMs < 80000;
@@ -304,7 +299,7 @@ app.get('/api/devices', (req, res) => {
     return res.json(list);
 });
 
-// 5. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
+// 6. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
 app.get('/api/status/:id', (req, res) => {
     checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
