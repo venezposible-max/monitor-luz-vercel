@@ -105,7 +105,7 @@ app.post('/api/ping', (req, res) => {
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
     const wasBlackout = existing.blackoutNotified || false;
-    const targetChatId = chatId || existing.chatId || '';
+    const targetChatId = chatId || existing.chatId || '330749449';
 
     // DOBLE GARANTÍA DE REGRESO DE LUZ: Si estuvo en corte y acaba de reconectarse
     if (wasBlackout && targetChatId) {
@@ -116,7 +116,7 @@ app.post('/api/ping', (req, res) => {
                           `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
                           `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
 
-        console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId}`);
+        console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId} a chatId ${targetChatId}`);
         sendTelegramMessage(targetChatId, returnMsg);
     }
 
