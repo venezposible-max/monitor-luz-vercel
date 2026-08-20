@@ -104,13 +104,28 @@ app.post('/api/ping', (req, res) => {
 
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
+    const wasBlackout = existing.blackoutNotified || false;
+    const targetChatId = chatId || existing.chatId || '';
+
+    // DOBLE GARANTÍA DE REGRESO DE LUZ: Si estuvo en corte y acaba de reconectarse
+    if (wasBlackout && targetChatId) {
+        const returnTime = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
+                          `⏰ <b>Hora de regreso:</b> ${returnTime}\n\n` +
+                          `La energía eléctrica ha regresado a tu casa.\n\n` +
+                          `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                          `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+
+        console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId}`);
+        sendTelegramMessage(targetChatId, returnMsg);
+    }
 
     const devData = {
         deviceId: deviceId,
         lastSeen: now,
         onlineSince: onlineSince,
-        chatId: chatId || (existing.chatId || ''),
-        blackoutNotified: false, // Resetear bandera al volver la señal
+        chatId: targetChatId,
+        blackoutNotified: false, // Resetear bandera al volver la luz
         resetRequested: false,
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
@@ -121,7 +136,6 @@ app.post('/api/ping', (req, res) => {
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
 
-    // Ejecutar chequeo de alertas
     checkBlackoutAlerts();
 
     return res.json({ 
@@ -156,7 +170,6 @@ app.post('/api/telegram-webhook', (req, res) => {
             return res.status(200).send('OK');
         }
 
-        // Ejecutar chequeo de alertas
         checkBlackoutAlerts();
 
         let replyMsg = "";
