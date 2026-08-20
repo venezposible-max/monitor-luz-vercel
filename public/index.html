@@ -354,6 +354,27 @@
         }, 1000);
     }
 
+    // Guardar datos del dispositivo en localStorage para que NUNCA se pierda el último reporte
+    function cacheDeviceData(deviceId, data) {
+        try {
+            localStorage.setItem(`device_${deviceId}`, JSON.stringify({
+                lastSeen: data.lastSeen,
+                onlineSince: data.onlineSince,
+                elapsedMs: data.elapsedMs,
+                uptimeMs: data.uptimeMs,
+                status: data.status,
+                cachedAt: Date.now()
+            }));
+        } catch(e) {}
+    }
+
+    function getCachedDeviceData(deviceId) {
+        try {
+            const cached = localStorage.getItem(`device_${deviceId}`);
+            return cached ? JSON.parse(cached) : null;
+        } catch(e) { return null; }
+    }
+
     async function fetchStatus() {
         if (!currentDeviceId) return;
         countdownTimer = 10;
@@ -362,12 +383,29 @@
             const res = await fetch(`/api/status/${currentDeviceId}`);
             const data = await res.json();
 
+            // Si el servidor perdió la memoria (cold start), usar datos guardados localmente
             if (!data.found) {
-                renderState('offline', 'SE FUE LA LUZ 🔴', 'La placa está desconectada o se interrumpió la energía eléctrica.');
-                document.getElementById('uptimeText').textContent = "Sin servicio de luz";
-                document.getElementById('lastReportText').textContent = "--:--:--";
+                const cached = getCachedDeviceData(currentDeviceId);
+                if (cached && cached.lastSeen) {
+                    const lastDate = new Date(cached.lastSeen);
+                    const now = Date.now();
+                    const elapsedMs = now - cached.lastSeen;
+                    const diffMins = Math.floor(elapsedMs / 60000);
+                    let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
+
+                    renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
+                    document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+                    document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                } else {
+                    renderState('offline', 'SE FUE LA LUZ 🔴', 'La placa está desconectada o se interrumpió la energía eléctrica.');
+                    document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+                    document.getElementById('lastReportText').textContent = "--:--:--";
+                }
                 return;
             }
+
+            // Guardar en localStorage para que sobreviva cold starts del servidor
+            cacheDeviceData(currentDeviceId, data);
 
             const lastDate = new Date(data.lastSeen);
             document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -404,7 +442,16 @@
             }
         } catch (e) {
             console.error(e);
-            renderState('unknown', 'ERROR CONEXIÓN', 'No se pudo conectar con el servidor en Railway.');
+            // Incluso si hay error de red, intentar mostrar datos guardados
+            const cached = getCachedDeviceData(currentDeviceId);
+            if (cached && cached.lastSeen) {
+                const lastDate = new Date(cached.lastSeen);
+                document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                renderState('offline', 'SE FUE LA LUZ 🔴', 'Sin conexión con el servidor. Mostrando último dato guardado.');
+                document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+            } else {
+                renderState('unknown', 'ERROR CONEXIÓN', 'No se pudo conectar con el servidor.');
+            }
         }
     }
 
