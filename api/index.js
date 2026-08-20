@@ -290,7 +290,13 @@ app.post('/api/reset-wifi', (req, res) => {
     return res.json({ success: true, message: 'Orden de reinicio registrada.' });
 });
 
-// 4. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
+// 4. ENDPOINT CRON JOB DE VERCEL PARA CHEQUEAR CORTES CADA MINUTO AUTOMÁTICAMENTE
+app.get('/api/cron-check-blackout', (req, res) => {
+    checkBlackoutAlerts();
+    return res.json({ success: true, message: 'Chequeo automático de cortes ejecutado.' });
+});
+
+// 5. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
 app.get('/api/devices', (req, res) => {
     checkBlackoutAlerts();
     const combined = { ...global.persistentStore, ...global.devices };

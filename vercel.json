@@ -9,5 +9,11 @@
       "source": "/(.*)",
       "destination": "/public/$1"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron-check-blackout",
+      "schedule": "* * * * *"
+    }
   ]
 }
