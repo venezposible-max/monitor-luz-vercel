@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
@@ -13,12 +15,45 @@ global.devices = global.devices || {};
 global.persistentStore = global.persistentStore || {};
 
 const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
+const TMP_FILE = '/tmp/monitor-luz-devices.json';
+
+// Guardar datos del dispositivo en archivo /tmp para sobrevivir entre invocaciones
+function saveToDisk() {
+    try {
+        const combined = { ...global.persistentStore, ...global.devices };
+        fs.writeFileSync(TMP_FILE, JSON.stringify(combined), 'utf8');
+    } catch (e) {
+        console.error('Error guardando en /tmp:', e.message);
+    }
+}
+
+// Cargar datos del archivo /tmp al iniciar (recupera datos tras cold start parcial)
+function loadFromDisk() {
+    try {
+        if (fs.existsSync(TMP_FILE)) {
+            const raw = fs.readFileSync(TMP_FILE, 'utf8');
+            const data = JSON.parse(raw);
+            for (const [id, dev] of Object.entries(data)) {
+                if (!global.devices[id] && !global.persistentStore[id]) {
+                    global.persistentStore[id] = dev;
+                }
+            }
+            console.log('[DISK] Datos recuperados de /tmp:', Object.keys(data).length, 'dispositivos');
+        }
+    } catch (e) {
+        console.error('Error leyendo /tmp:', e.message);
+    }
+}
+
+// Cargar datos al arrancar
+loadFromDisk();
 
 function persistDevice(deviceId, data) {
     global.persistentStore[deviceId] = {
         ...data,
         updatedAt: Date.now()
     };
+    saveToDisk();
 }
 
 function getDevice(deviceId) {
@@ -236,9 +271,29 @@ app.post('/api/telegram-webhook', (req, res) => {
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 } else {
                     const elapsedMins = Math.floor(elapsedMs / 60000);
+                    const lastSeenDate = new Date(userDev.lastSeen);
+                    const lastSeenTime = lastSeenDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+                    const lastSeenDateStr = lastSeenDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
+
+                    let tiempoSinLuz = '';
+                    if (elapsedMins < 60) {
+                        tiempoSinLuz = `${elapsedMins} minuto${elapsedMins === 1 ? '' : 's'}`;
+                    } else {
+                        const horas = Math.floor(elapsedMins / 60);
+                        const mins = elapsedMins % 60;
+                        if (horas < 24) {
+                            tiempoSinLuz = `${horas} hora${horas === 1 ? '' : 's'} y ${mins} min`;
+                        } else {
+                            const dias = Math.floor(horas / 24);
+                            const remHoras = horas % 24;
+                            tiempoSinLuz = `${dias} día${dias === 1 ? '' : 's'}, ${remHoras}h y ${mins}m`;
+                        }
+                    }
+
                     replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
                                `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
-                               `📡 <b>Último reporte:</b> Hace ${elapsedMins} minutos\n` +
+                               `🕐 <b>Último reporte:</b> ${lastSeenTime} (${lastSeenDateStr})\n` +
+                               `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n` +
                                `⚠️ <i>La placa se encuentra apagada sin servicio de luz.</i>\n\n` +
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
