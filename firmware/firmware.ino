@@ -1,8 +1,14 @@
 /*
-  =============================================================================
-  PROYECTO: Monitor de Luz e Internet (ESP8266 -> Servidor Vercel)
-  VERSIÓN: Copiar Enlace en 1 Solo Clic + Hora Exacta en Telegram
-  =============================================================================
+  FIRMWARE MONITOR DE LUZ E INTERNET (ESP8266) - VERSIÓN PRODUCCIÓN PERMANENTE
+  ----------------------------------------------------------------------------
+  - Búsqueda Infinita de WiFi tras apagones (NUNCA entra en modo Configurar-Luz por tiempo).
+  - La red 'Configurar-Luz' SOLO se abre por:
+      1. Placa nueva (EEPROM vacía por primera vez).
+      2. Doble desenchufado rápido (2 cortes de energía rápidos en < 3s).
+      3. Orden de reinicio remoto desde Telegram (/reiniciar) o App Web.
+  - Sincronización NTP de hora local de Venezuela (GMT-4).
+  - Alerta de regreso de luz con hora destacada en Telegram.
+  - Copia de enlace en 1 clic en el portal cautivo.
 */
 
 #include <ESP8266WiFi.h>
@@ -13,13 +19,14 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 
+// SERVIDOR Y TOKEN CENTRAL DE LA MARCA
 const char* RAILWAY_SERVER_URL = "https://monitor-luz-vercel.vercel.app";
-const char* TELEGRAM_BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38"; 
+const char* TELEGRAM_BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 
-#define EEPROM_SIZE 160
+const unsigned long PING_INTERVAL = 60000; // 60 segundos
 const byte DNS_PORT = 53;
-IPAddress apIP(192, 168, 4, 1);
 
+IPAddress apIP(192, 168, 4, 1);
 DNSServer dnsServer;
 ESP8266WebServer webServer(80);
 
@@ -28,21 +35,22 @@ String password = "";
 String telegramChatId = "";
 String deviceId = "";
 
-unsigned long lastPingTime = 0;
-const unsigned long PING_INTERVAL = 60000;
 bool configMode = false;
+unsigned long lastPingTime = 0;
 
+// -----------------------------------------------------------------------------
+// CONTROL DE EEPROM (PAGINACIÓN 512 BYTES)
+// -----------------------------------------------------------------------------
 bool isValidSSID(String s) {
-  if (s.length() == 0 || s.length() > 32) return false;
+  if (s.length() < 2 || s.length() > 32) return false;
   for (unsigned int i = 0; i < s.length(); i++) {
-    unsigned char c = (unsigned char)s[i];
-    if (c < 32 || c > 126) return false;
+    if (s[i] < 32 || s[i] > 126) return false;
   }
   return true;
 }
 
 void loadCredentials() {
-  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.begin(512);
   char ssidBuf[33] = {0};
   char passBuf[65] = {0};
   char tgBuf[33] = {0};
@@ -63,27 +71,26 @@ void loadCredentials() {
   ssid = String(ssidBuf);
   password = String(passBuf);
   telegramChatId = String(tgBuf);
+
   ssid.trim();
   password.trim();
   telegramChatId.trim();
-
-  if (!isValidSSID(ssid)) {
-    ssid = "";
-    password = "";
-  }
 }
 
 void saveCredentials(String qssid, String qpass, String qtg) {
-  EEPROM.begin(EEPROM_SIZE);
-  for (int i = 0; i < EEPROM_SIZE; ++i) EEPROM.write(i, 0);
+  EEPROM.begin(512);
+  for (int i = 0; i < 512; ++i) EEPROM.write(i, 0);
 
-  for (int i = 0; i < qssid.length(); ++i) EEPROM.write(i, qssid[i]);
-  for (int i = 0; i < qpass.length(); ++i) EEPROM.write(32 + i, qpass[i]);
-  for (int i = 0; i < qtg.length(); ++i) EEPROM.write(96 + i, qtg[i]);
+  for (unsigned int i = 0; i < qssid.length(); ++i) EEPROM.write(i, qssid[i]);
+  for (unsigned int i = 0; i < qpass.length(); ++i) EEPROM.write(32 + i, qpass[i]);
+  for (unsigned int i = 0; i < qtg.length(); ++i) EEPROM.write(96 + i, qtg[i]);
   
   EEPROM.commit();
 }
 
+// -----------------------------------------------------------------------------
+// NOTIFICACIÓN TELEGRAM AL VOLVER LA LUZ
+// -----------------------------------------------------------------------------
 void sendTelegramNotification(String msg) {
   if (telegramChatId.length() == 0 || strlen(TELEGRAM_BOT_TOKEN) == 0) return;
 
@@ -92,15 +99,25 @@ void sendTelegramNotification(String msg) {
   HTTPClient http;
 
   String telegramUrl = "https://api.telegram.org/bot" + String(TELEGRAM_BOT_TOKEN) + "/sendMessage";
+  Serial.print("[TELEGRAM] Enviando aviso a Chat ID " + telegramChatId + "... ");
 
   if (http.begin(client, telegramUrl)) {
     http.addHeader("Content-Type", "application/json");
     String payload = "{\"chat_id\":\"" + telegramChatId + "\",\"text\":\"" + msg + "\",\"parse_mode\":\"HTML\"}";
     int httpCode = http.POST(payload);
+
+    if (httpCode > 0) {
+      Serial.printf("OK (%d)\n", httpCode);
+    } else {
+      Serial.printf("Error Telegram: %s\n", http.errorToString(httpCode).c_str());
+    }
     http.end();
   }
 }
 
+// -----------------------------------------------------------------------------
+// PORTAL CAUTIVO HTML CON BOTÓN DE 1 CLIC PARA COPIAR ENLACE
+// -----------------------------------------------------------------------------
 void handleRoot() {
   int n = WiFi.scanNetworks();
   
@@ -283,6 +300,7 @@ void setup() {
   EEPROM.begin(512);
   byte resetCounter = EEPROM.read(90);
 
+  // DETECCION DE DOBLE DESENCHUFADO RÁPIDO PARA REINICIO MANUAL
   if (resetCounter >= 2) {
     EEPROM.write(90, 0);
     EEPROM.commit();
@@ -296,58 +314,65 @@ void setup() {
 
   loadCredentials();
 
+  // SI LA PLACA NO TIENE WIFI GUARDADO (PLACA NUEVA), ABRE 'Configurar-Luz'
   if (ssid.length() == 0 || !isValidSSID(ssid)) {
     startConfigPortal();
   } else {
+    // SI YA TIENE WIFI GUARDADO, BUSCA EL ROUTER INFINITAMENTE SIN LÍMITES DE TIEMPO
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
 
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 360) {
+    Serial.println("[WIFI] Buscando router guardado '" + ssid + "' pacientemente...");
+
+    int flashCounter = 0;
+    while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      if (tries % 4 == 0) {
+      flashCounter++;
+      // Parpadeo de espera (LED azul)
+      if (flashCounter % 2 == 0) {
         digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
       }
-      tries++;
+      // Reintentar conexión cada 30 segundos por si el router terminó de encender
+      if (flashCounter % 60 == 0) {
+        WiFi.begin(ssid.c_str(), password.c_str());
+      }
     }
 
+    // ¡SE CONECTÓ AL ROUTER CON ÉXITO!
     digitalWrite(LED_BUILTIN, HIGH);
+    EEPROM.write(90, 0);
+    EEPROM.commit();
 
-    if (WiFi.status() == WL_CONNECTED) {
-      EEPROM.write(90, 0);
-      EEPROM.commit();
-
-      configTime(-4 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-      int ntpTries = 0;
-      while (time(nullptr) < 100000 && ntpTries < 10) {
-        delay(300);
-        ntpTries++;
-      }
-
-      time_t now = time(nullptr);
-      struct tm* timeinfo = localtime(&now);
-      char timeBuffer[20];
-      strftime(timeBuffer, sizeof(timeBuffer), "%I:%M %p", timeinfo);
-      String formattedTime = String(timeBuffer);
-      formattedTime.trim();
-
-      if (formattedTime.length() == 0 || formattedTime == "12:00 AM") {
-        formattedTime = "Reciente";
-      }
-
-      if (telegramChatId.length() > 0) {
-        String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n"
-                          "⏰ <b>Hora de regreso:</b> " + formattedTime + "\n\n"
-                          "La energía eléctrica ha regresado a tu casa.\n\n"
-                          "📱 <b>Dispositivo:</b> " + deviceId + "\n"
-                          "🔗 <b>Monitor:</b> " + String(RAILWAY_SERVER_URL) + "/?id=" + deviceId;
-        sendTelegramNotification(alertMsg);
-      }
-
-      sendPingToRailway();
-    } else {
-      startConfigPortal();
+    // Sincronizar hora local vía servidor NTP (Zona Horaria Venezuela GMT-4)
+    configTime(-4 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    int ntpTries = 0;
+    while (time(nullptr) < 100000 && ntpTries < 10) {
+      delay(300);
+      ntpTries++;
     }
+
+    time_t now = time(nullptr);
+    struct tm* timeinfo = localtime(&now);
+    char timeBuffer[20];
+    strftime(timeBuffer, sizeof(timeBuffer), "%I:%M %p", timeinfo);
+    String formattedTime = String(timeBuffer);
+    formattedTime.trim();
+
+    if (formattedTime.length() == 0 || formattedTime == "12:00 AM") {
+      formattedTime = "Reciente";
+    }
+
+    // NOTIFICACIÓN TELEGRAM AL VOLVER LA LUZ
+    if (telegramChatId.length() > 0) {
+      String alertMsg = "⚡ <b>¡VOLVIÓ LA LUZ!</b>\n"
+                        "⏰ <b>Hora de regreso:</b> " + formattedTime + "\n\n"
+                        "La energía eléctrica ha regresado a tu casa.\n\n"
+                        "📱 <b>Dispositivo:</b> " + deviceId + "\n"
+                        "🔗 <b>Monitor:</b> " + String(RAILWAY_SERVER_URL) + "/?id=" + deviceId;
+      sendTelegramNotification(alertMsg);
+    }
+
+    sendPingToRailway();
   }
 }
 
