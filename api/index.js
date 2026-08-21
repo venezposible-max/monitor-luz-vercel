@@ -69,40 +69,56 @@ function getDevice(deviceId) {
     return global.devices[deviceId] || global.persistentStore[deviceId] || null;
 }
 
-// Función para enviar mensajes de Telegram de forma asíncrona
+// Función para enviar mensajes de Telegram garantizada (Promise awaitable para serverless)
 function sendTelegramMessage(chatId, text) {
-    if (!chatId) return;
-    try {
-        const payload = JSON.stringify({
-            chat_id: chatId,
-            text: text,
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                    [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
-                    [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
-                ]
-            }
-        });
+    if (!chatId) return Promise.resolve(false);
+    return new Promise((resolve) => {
+        try {
+            const payload = JSON.stringify({
+                chat_id: chatId,
+                text: text,
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                        [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
+                        [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
+                        [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
+                    ]
+                }
+            });
 
-        const options = {
-            hostname: 'api.telegram.org',
-            path: `/bot${BOT_TOKEN}/sendMessage`,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(payload)
-            }
-        };
+            const options = {
+                hostname: 'api.telegram.org',
+                path: `/bot${BOT_TOKEN}/sendMessage`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            };
 
-        const request = https.request(options);
-        request.write(payload);
-        request.end();
-    } catch (e) {
-        console.error('Error enviando Telegram:', e);
-    }
+            const request = https.request(options, (response) => {
+                let resData = '';
+                response.on('data', (chunk) => { resData += chunk; });
+                response.on('end', () => {
+                    console.log(`[TELEGRAM] Enviado con éxito a ${chatId}. Status: ${response.statusCode}`);
+                    resolve(true);
+                });
+            });
+
+            request.on('error', (err) => {
+                console.error('[TELEGRAM ERROR]:', err.message);
+                resolve(false);
+            });
+
+            request.write(payload);
+            request.end();
+        } catch (e) {
+            console.error('Error enviando Telegram:', e);
+            resolve(false);
+        }
+    });
 }
 
 // Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
@@ -135,7 +151,7 @@ function setupTelegramCommands() {
 setupTelegramCommands();
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico)
-function checkBlackoutAlerts() {
+async function checkBlackoutAlerts() {
     const now = Date.now();
     const combined = { ...global.persistentStore, ...global.devices };
 
@@ -188,13 +204,13 @@ function checkBlackoutAlerts() {
                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
 
             console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${dev.chatId} para ${dev.deviceId}`);
-            sendTelegramMessage(dev.chatId, alertMsg);
+            await sendTelegramMessage(dev.chatId, alertMsg);
         }
     }
 }
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
-app.post('/api/ping', (req, res) => {
+app.post('/api/ping', async (req, res) => {
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
     const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
@@ -271,7 +287,7 @@ app.post('/api/ping', (req, res) => {
                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
 
             console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId} a chatId ${targetChatId}`);
-            sendTelegramMessage(targetChatId, returnMsg);
+            await sendTelegramMessage(targetChatId, returnMsg);
         }
     }
 
@@ -293,7 +309,7 @@ app.post('/api/ping', (req, res) => {
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
 
-    checkBlackoutAlerts();
+    await checkBlackoutAlerts();
 
     return res.json({ 
         success: true, 
@@ -527,8 +543,8 @@ app.get('/api/devices', (req, res) => {
 });
 
 // 7. ENDPOINT PARA CONSULTAR EL ESTADO E HISTORIAL (GET /api/status/:id)
-app.get('/api/status/:id', (req, res) => {
-    checkBlackoutAlerts();
+app.get('/api/status/:id', async (req, res) => {
+    await checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
     const device = getDevice(deviceId);
 
@@ -550,7 +566,7 @@ app.get('/api/status/:id', (req, res) => {
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
     if (!isOnline && !device.blackoutNotified && device.chatId) {
-        checkBlackoutAlerts();
+        await checkBlackoutAlerts();
     }
 
     return res.json({
