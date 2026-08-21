@@ -483,9 +483,10 @@ app.post('/api/telegram-webhook', (req, res) => {
             }
         } else {
             replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                       `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu placa es:\n\n` +
-                       `👉 <code>${chatId}</code> <i>(Toca el número para copiarlo)</i>\n\n` +
-                       `📱 <i>Pega este número en la casilla 'Chat ID' al configurar la red de tu placa.</i>\n\n` +
+                       `Hola <b>${senderName}</b>, este es tu número de <b>Chat ID</b>:\n\n` +
+                       `<code>${chatId}</code>\n\n` +
+                       `👆 <i>(Toca el recuadro gris arriba para copiar ÚNICAMENTE el número)</i>\n\n` +
+                       `📱 <i>Pégalo en la casilla de Telegram al configurar tu dispositivo.</i>\n\n` +
                        `💡 <i>Escribe <b>/estado</b> para consultar si hay luz o <b>/historial</b> para ver los cortes registrados.</i>`;
         }
 
