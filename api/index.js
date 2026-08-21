@@ -212,10 +212,14 @@ app.post('/api/ping', (req, res) => {
     const targetChatId = chatId || existing.chatId || '';
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ TRAS UN CORTE REGISTRADO
-    if (wasBlackout) {
+    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 80s, o por corte abierto en historial)
+    const hasOpenCut = history.length > 0 && !history[0].end;
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 80000) : false;
+    const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
+
+    if (isReturnFromBlackout && existing.lastSeen) {
         const blackoutStart = existing.blackoutStartTime || existing.lastSeen || (now - 80000);
-        const durationMs = now - blackoutStart;
+        const durationMs = Math.max(now - blackoutStart, 60000);
         const totalMins = Math.floor(durationMs / 60000);
 
         let durationFormatted = "";
