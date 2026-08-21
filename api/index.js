@@ -159,9 +159,13 @@ async function checkBlackoutAlerts() {
         if (!dev.lastSeen) continue;
         const elapsedMs = now - dev.lastSeen;
 
+        let devChatId = dev.chatId || global.lastInteractedChatId || '330749449';
+        if (devChatId === '3307499449') devChatId = '330749449';
+
         // Si han pasado más de 80 segundos sin señal y no se ha notificado la ida de luz
-        if (elapsedMs >= 80000 && !dev.blackoutNotified && dev.chatId) {
+        if (elapsedMs >= 80000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
+            dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
             dev.history = dev.history || [];
 
@@ -187,11 +191,13 @@ async function checkBlackoutAlerts() {
 
             if (global.devices[dev.deviceId]) {
                 global.devices[dev.deviceId].blackoutNotified = true;
+                global.devices[dev.deviceId].chatId = devChatId;
                 global.devices[dev.deviceId].blackoutStartTime = dev.lastSeen;
                 global.devices[dev.deviceId].history = dev.history;
             }
             if (global.persistentStore[dev.deviceId]) {
                 global.persistentStore[dev.deviceId].blackoutNotified = true;
+                global.persistentStore[dev.deviceId].chatId = devChatId;
                 global.persistentStore[dev.deviceId].blackoutStartTime = dev.lastSeen;
                 global.persistentStore[dev.deviceId].history = dev.history;
             }
@@ -203,8 +209,8 @@ async function checkBlackoutAlerts() {
                              `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
 
-            console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${dev.chatId} para ${dev.deviceId}`);
-            await sendTelegramMessage(dev.chatId, alertMsg);
+            console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${devChatId} para ${dev.deviceId}`);
+            await sendTelegramMessage(devChatId, alertMsg);
         }
     }
 }
@@ -225,7 +231,13 @@ app.post('/api/ping', async (req, res) => {
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
     const wasBlackout = existing.blackoutNotified || false;
-    const targetChatId = chatId || existing.chatId || '';
+    let targetChatId = chatId || existing.chatId || '';
+
+    // Sanitizar typo común de chatId
+    if (targetChatId === '3307499449') targetChatId = '330749449';
+    if (!targetChatId && global.lastInteractedChatId) targetChatId = global.lastInteractedChatId;
+    if (!targetChatId) targetChatId = '330749449'; // Default fallback chat ID
+
     let history = existing.history || [];
 
     // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 80s, o por corte abierto en historial)
