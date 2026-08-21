@@ -290,9 +290,30 @@
         </button>
     </div>
 
+    <!-- SECCIÓN DE HISTORIAL DE CORTES ELÉCTRICOS -->
+    <div class="qr-section" style="margin-top: 18px; text-align: left;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
+            <div>
+                <h3 style="font-size: 0.95rem; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                    <span>📜</span> Historial de Cortes de Luz
+                </h3>
+                <span id="historyCountBadge" style="font-size: 0.72rem; color: var(--text-sub);">0 cortes registrados</span>
+            </div>
+            <button id="btnClearHistory" onclick="clearHistory()" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; font-size: 0.72rem; font-weight: 600; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+                <span>🗑️</span> Borrar Historial
+            </button>
+        </div>
+
+        <div id="historyListContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 4px;">
+            <div style="text-align: center; color: var(--text-sub); font-size: 0.8rem; padding: 14px 0;">
+                Cargando historial de cortes...
+            </div>
+        </div>
+    </div>
+
     <div class="qr-section">
-        <h3 style="font-size: 0.95rem; margin-bottom: 8px;">📱 Guardar o Compartir Enlace</h3>
-        <p style="font-size: 0.8rem; color: var(--text-sub);">Escanea este QR o copia el enlace directo a tu monitor:</p>
+        <h3 style="font-size: 0.95rem; margin-bottom: 8px; text-align: center;">📱 Guardar o Compartir Enlace</h3>
+        <p style="font-size: 0.8rem; color: var(--text-sub); text-align: center;">Escanea este QR o copia el enlace directo a tu monitor:</p>
         
         <div id="qrcode"></div>
 
@@ -410,6 +431,9 @@
             const lastDate = new Date(data.lastSeen);
             document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+            // Renderizar Historial de Cortes
+            renderHistory(data.history || []);
+
             if (data.elapsedMs < 80000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
 
@@ -452,6 +476,88 @@
             } else {
                 renderState('unknown', 'ERROR CONEXIÓN', 'No se pudo conectar con el servidor.');
             }
+        }
+    }
+
+    function renderHistory(history) {
+        const container = document.getElementById('historyListContainer');
+        const countBadge = document.getElementById('historyCountBadge');
+        if (!container || !countBadge) return;
+
+        countBadge.textContent = `${history.length} corte${history.length === 1 ? '' : 's'} registrado${history.length === 1 ? '' : 's'}`;
+
+        if (!history || history.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; color: var(--text-sub); font-size: 0.82rem; padding: 18px 0; background: rgba(255,255,255,0.02); border-radius: 10px; border: 1px dashed rgba(255,255,255,0.08);">
+                    ✨ No hay cortes de luz registrados. ¡El servicio eléctrico ha estado estable!
+                </div>
+            `;
+            return;
+        }
+
+        let html = "";
+        history.forEach((item, index) => {
+            const isOngoing = !item.end;
+            const cardBg = isOngoing ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.03)';
+            const borderCol = isOngoing ? 'rgba(239, 68, 68, 0.35)' : 'rgba(255, 255, 255, 0.06)';
+            const icon = isOngoing ? '🔴' : '⚡';
+            const statusTag = isOngoing 
+                ? `<span style="background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">EN CURSO</span>`
+                : `<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">RESUELTO</span>`;
+
+            html += `
+                <div style="background: ${cardBg}; border: 1px solid ${borderCol}; border-radius: 12px; padding: 10px 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 700; color: #fff; display: flex; align-items: center; gap: 4px;">
+                            <span>${icon}</span> Corte #${history.length - index}
+                        </span>
+                        ${statusTag}
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; font-size: 0.76rem; color: var(--text-sub);">
+                        <div>
+                            <span style="display: block; font-size: 0.68rem; text-transform: uppercase;">Ida de Luz</span>
+                            <strong style="color: #f87171;">${item.startTimeStr}</strong>
+                            <span style="display: block; font-size: 0.68rem;">${item.startDateStr || ''}</span>
+                        </div>
+                        <div>
+                            <span style="display: block; font-size: 0.68rem; text-transform: uppercase;">Regreso de Luz</span>
+                            <strong style="color: #34d399;">${item.endTimeStr || '---'}</strong>
+                            <span style="display: block; font-size: 0.68rem;">${item.endDateStr || ''}</span>
+                        </div>
+                    </div>
+                    <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px; margin-top: 2px; display: flex; justify-content: space-between; font-size: 0.75rem;">
+                        <span style="color: var(--text-sub);">Duración del corte:</span>
+                        <strong style="color: #fbbf24;">${item.durationStr}</strong>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    async function clearHistory() {
+        if (!currentDeviceId) return;
+
+        const confirmDelete = confirm(`¿Estás seguro de que deseas BORRAR todo el historial de cortes de luz del dispositivo ${currentDeviceId}?\n\nEsta acción no se puede deshacer.`);
+        if (!confirmDelete) return;
+
+        try {
+            const res = await fetch('/api/clear-history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: currentDeviceId })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                renderHistory([]);
+                alert("🗑️ " + (data.message || "Historial borrado exitosamente."));
+            } else {
+                alert("⚠️ Error: " + (data.error || "No se pudo borrar el historial."));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("⚠️ Error al conectar con el servidor.");
         }
     }
 

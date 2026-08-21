@@ -107,13 +107,43 @@ function checkBlackoutAlerts() {
         // Si han pasado más de 80 segundos sin señal y no se ha notificado la ida de luz
         if (elapsedMs >= 80000 && !dev.blackoutNotified && dev.chatId) {
             dev.blackoutNotified = true;
-            if (global.devices[dev.deviceId]) global.devices[dev.deviceId].blackoutNotified = true;
-            if (global.persistentStore[dev.deviceId]) global.persistentStore[dev.deviceId].blackoutNotified = true;
+            dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
+            dev.history = dev.history || [];
 
-            const cutoffTime = new Date(dev.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            // Agregar registro de corte pendiente (sin hora de regreso aún)
+            const cutoffDate = new Date(dev.lastSeen);
+            const cutoffTimeStr = cutoffDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+            const cutoffDateStr = cutoffDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
+
+            const eventId = `event_${dev.lastSeen}`;
+            const exists = dev.history.some(h => h.id === eventId || (h.start === dev.lastSeen && !h.end));
+            if (!exists) {
+                dev.history.unshift({
+                    id: eventId,
+                    start: dev.lastSeen,
+                    startTimeStr: cutoffTimeStr,
+                    startDateStr: cutoffDateStr,
+                    end: null,
+                    endTimeStr: null,
+                    durationStr: 'En curso...',
+                    durationMs: 0
+                });
+            }
+
+            if (global.devices[dev.deviceId]) {
+                global.devices[dev.deviceId].blackoutNotified = true;
+                global.devices[dev.deviceId].blackoutStartTime = dev.lastSeen;
+                global.devices[dev.deviceId].history = dev.history;
+            }
+            if (global.persistentStore[dev.deviceId]) {
+                global.persistentStore[dev.deviceId].blackoutNotified = true;
+                global.persistentStore[dev.deviceId].blackoutStartTime = dev.lastSeen;
+                global.persistentStore[dev.deviceId].history = dev.history;
+            }
+            saveToDisk();
 
             const alertMsg = `🔴 <b>¡ALERTA! SE ACABA DE IR LA LUZ 🔌</b>\n\n` +
-                             `⏰ <b>Hora aproximada de corte:</b> ${cutoffTime}\n\n` +
+                             `⏰ <b>Hora aproximada de corte:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
                              `Tu dispositivo ha dejado de transmitir señal por corte de energía eléctrica en tu casa.\n\n` +
                              `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
@@ -141,18 +171,65 @@ app.post('/api/ping', (req, res) => {
     const shouldReset = existing.resetRequested || false;
     const wasBlackout = existing.blackoutNotified || false;
     const targetChatId = chatId || existing.chatId || '';
+    let history = existing.history || [];
 
-    // NOTIFICACIÓN GENÉRICA AL VOLVER LA LUZ AL CHAT ID ESPECÍFICO DEL CLIENTE
-    if (wasBlackout && targetChatId) {
-        const returnTime = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
-                          `⏰ <b>Hora de regreso:</b> ${returnTime}\n\n` +
-                          `La energía eléctrica ha regresado a tu casa.\n\n` +
-                          `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                          `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+    // SI REGRESÓ LA LUZ TRAS UN CORTE REGISTRADO
+    if (wasBlackout) {
+        const blackoutStart = existing.blackoutStartTime || existing.lastSeen || (now - 80000);
+        const durationMs = now - blackoutStart;
+        const totalMins = Math.floor(durationMs / 60000);
 
-        console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId} a chatId ${targetChatId}`);
-        sendTelegramMessage(targetChatId, returnMsg);
+        let durationFormatted = "";
+        if (totalMins < 1) {
+            durationFormatted = "Menos de 1 min";
+        } else if (totalMins < 60) {
+            durationFormatted = `${totalMins} min`;
+        } else {
+            const h = Math.floor(totalMins / 60);
+            const m = totalMins % 60;
+            durationFormatted = `${h}h ${m}m`;
+        }
+
+        const returnDate = new Date(now);
+        const returnTimeStr = returnDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+        const returnDateStr = returnDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
+
+        // Actualizar el último corte en el historial
+        if (history.length > 0 && !history[0].end) {
+            history[0].end = now;
+            history[0].endTimeStr = returnTimeStr;
+            history[0].endDateStr = returnDateStr;
+            history[0].durationStr = durationFormatted;
+            history[0].durationMs = durationMs;
+        } else {
+            const startDate = new Date(blackoutStart);
+            history.unshift({
+                id: `event_${blackoutStart}`,
+                start: blackoutStart,
+                startTimeStr: startDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Caracas' }),
+                startDateStr: startDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' }),
+                end: now,
+                endTimeStr: returnTimeStr,
+                endDateStr: returnDateStr,
+                durationStr: durationFormatted,
+                durationMs: durationMs
+            });
+        }
+
+        // Limitar historial a los últimos 50 eventos
+        if (history.length > 50) history = history.slice(0, 50);
+
+        if (targetChatId) {
+            const returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
+                              `⏰ <b>Hora de regreso:</b> ${returnTimeStr} (${returnDateStr})\n` +
+                              `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
+                              `La energía eléctrica ha regresado a tu casa.\n\n` +
+                              `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+
+            console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId} a chatId ${targetChatId}`);
+            sendTelegramMessage(targetChatId, returnMsg);
+        }
     }
 
     const devData = {
@@ -161,6 +238,8 @@ app.post('/api/ping', (req, res) => {
         onlineSince: onlineSince,
         chatId: targetChatId,
         blackoutNotified: false, // Resetear bandera al volver la luz
+        blackoutStartTime: null,
+        history: history,
         resetRequested: false,
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
@@ -298,12 +377,44 @@ app.post('/api/telegram-webhook', (req, res) => {
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
+        } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes') || text.includes('registro')) {
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
+            const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length > 0 ? allDevs[0] : null);
+
+            if (!userDev) {
+                replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
+            } else {
+                const history = userDev.history || [];
+                if (history.length === 0) {
+                    replyMsg = `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
+                               `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n\n` +
+                               `✨ <i>No hay registros de cortes de luz almacenados. ¡El servicio ha estado estable!</i>\n\n` +
+                               `🔗 <b>Ver en Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                } else {
+                    let historyListText = "";
+                    const maxShow = Math.min(history.length, 5);
+                    for (let i = 0; i < maxShow; i++) {
+                        const h = history[i];
+                        const icon = h.end ? "⚡" : "🔴";
+                        historyListText += `${icon} <b>Corte #${history.length - i}:</b>\n` +
+                                           `   • <b>Ida:</b> ${h.startTimeStr} (${h.startDateStr})\n` +
+                                           `   • <b>Regreso:</b> ${h.endTimeStr ? `${h.endTimeStr} (${h.endDateStr})` : '<i>En curso...</i>'}\n` +
+                                           `   • <b>Duración:</b> <code>${h.durationStr}</code>\n\n`;
+                    }
+
+                    replyMsg = `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
+                               `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
+                               `📊 <b>Total de cortes registrados:</b> ${history.length}\n\n` +
+                               historyListText +
+                               `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                }
+            }
         } else {
             replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
                        `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
                        `👉 <code>${chatId}</code>\n\n` +
                        `📱 <i>Copia este número y pégalo en la casilla de Telegram al configurar tu dispositivo.</i>\n\n` +
-                       `💡 <i>Escribe <b>/estado</b> en cualquier momento para consultar si hay luz en tu casa.</i>`;
+                       `💡 <i>Escribe <b>/estado</b> para consultar si hay luz o <b>/historial</b> para ver los cortes registrados.</i>`;
         }
 
         return res.status(200).json({
@@ -314,6 +425,7 @@ app.post('/api/telegram-webhook', (req, res) => {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
                     [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
                     [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
                 ]
@@ -340,13 +452,30 @@ app.post('/api/reset-wifi', (req, res) => {
     return res.json({ success: true, message: 'Orden de reinicio registrada.' });
 });
 
-// 4. ENDPOINT CRON JOB DE VERCEL PARA CHEQUEAR CORTES CADA MINUTO AUTOMÁTICAMENTE
+// 4. ENDPOINT PARA BORRAR EL HISTORIAL DE UN DISPOSITIVO (POST /api/clear-history)
+app.post('/api/clear-history', (req, res) => {
+    const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const device = getDevice(deviceId);
+
+    if (!deviceId || !device) {
+        return res.status(404).json({ error: 'Dispositivo no encontrado' });
+    }
+
+    device.history = [];
+    if (global.devices[deviceId]) global.devices[deviceId].history = [];
+    if (global.persistentStore[deviceId]) global.persistentStore[deviceId].history = [];
+    saveToDisk();
+
+    return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente.` });
+});
+
+// 5. ENDPOINT CRON JOB DE VERCEL PARA CHEQUEAR CORTES CADA MINUTO AUTOMÁTICAMENTE
 app.get('/api/cron-check-blackout', (req, res) => {
     checkBlackoutAlerts();
     return res.json({ success: true, message: 'Chequeo automático de cortes ejecutado.' });
 });
 
-// 5. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
+// 6. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
 app.get('/api/devices', (req, res) => {
     checkBlackoutAlerts();
     const combined = { ...global.persistentStore, ...global.devices };
@@ -354,7 +483,7 @@ app.get('/api/devices', (req, res) => {
     return res.json(list);
 });
 
-// 6. ENDPOINT PARA CONSULTAR EL ESTADO (GET /api/status/:id)
+// 7. ENDPOINT PARA CONSULTAR EL ESTADO E HISTORIAL (GET /api/status/:id)
 app.get('/api/status/:id', (req, res) => {
     checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
@@ -365,7 +494,8 @@ app.get('/api/status/:id', (req, res) => {
             found: false,
             deviceId: deviceId,
             status: 'unknown',
-            message: 'El dispositivo no ha registrado ningún reporte todavía.'
+            message: 'El dispositivo no ha registrado ningún reporte todavía.',
+            history: []
         });
     }
 
@@ -382,7 +512,8 @@ app.get('/api/status/:id', (req, res) => {
         elapsedMs: elapsedMs,
         uptimeMs: uptimeMs,
         status: isOnline ? 'online' : 'offline',
-        message: isOnline ? 'HAY LUZ' : 'SE FUE LA LUZ'
+        message: isOnline ? 'HAY LUZ' : 'SE FUE LA LUZ',
+        history: device.history || []
     });
 });
 
