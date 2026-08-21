@@ -70,21 +70,22 @@ function getDevice(deviceId) {
 }
 
 // Función para enviar mensajes de Telegram garantizada (Promise awaitable para serverless)
-function sendTelegramMessage(chatId, text) {
+function sendTelegramMessage(chatId, text, customButtons = null) {
     if (!chatId) return Promise.resolve(false);
     return new Promise((resolve) => {
         try {
+            const buttons = customButtons || [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
+                [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
+            ];
+
             const payload = JSON.stringify({
                 chat_id: chatId,
                 text: text,
                 parse_mode: 'HTML',
                 reply_markup: {
-                    inline_keyboard: [
-                        [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                        [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                        [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
-                        [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
-                    ]
+                    inline_keyboard: buttons
                 }
             });
 
@@ -482,9 +483,9 @@ app.post('/api/telegram-webhook', (req, res) => {
             }
         } else {
             replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                       `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu equipo es:\n\n` +
-                       `👉 <code>${chatId}</code>\n\n` +
-                       `📱 <i>Copia este número y pégalo en la casilla de Telegram al configurar tu dispositivo.</i>\n\n` +
+                       `Hola <b>${senderName}</b>, tu número de <b>Chat ID</b> para configurar tu placa es:\n\n` +
+                       `👉 <code>${chatId}</code> <i>(Toca el número para copiarlo)</i>\n\n` +
+                       `📱 <i>Pega este número en la casilla 'Chat ID' al configurar la red de tu placa.</i>\n\n` +
                        `💡 <i>Escribe <b>/estado</b> para consultar si hay luz o <b>/historial</b> para ver los cortes registrados.</i>`;
         }
 
@@ -497,8 +498,7 @@ app.post('/api/telegram-webhook', (req, res) => {
                 inline_keyboard: [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
                     [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                    [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
-                    [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
+                    [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
                 ]
             }
         });
