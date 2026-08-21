@@ -482,12 +482,25 @@ app.post('/api/telegram-webhook', (req, res) => {
                 }
             }
         } else {
-            replyMsg = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                       `Hola <b>${senderName}</b>, este es tu número de <b>Chat ID</b>:\n\n` +
-                       `<code>${chatId}</code>\n\n` +
-                       `👆 <i>(Toca el recuadro gris arriba para copiar ÚNICAMENTE el número)</i>\n\n` +
-                       `📱 <i>Pégalo en la casilla de Telegram al configurar tu dispositivo.</i>\n\n` +
-                       `💡 <i>Escribe <b>/estado</b> para consultar si hay luz o <b>/historial</b> para ver los cortes registrados.</i>`;
+            // MENSAJE 1: Saludo inicial
+            const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
+                         `Hola <b>${senderName}</b>, a continuación te envío tu <b>Chat ID</b> en un mensaje separado para que lo copies fácilmente:`;
+            await sendTelegramMessage(chatId, msg1, []);
+
+            // MENSAJE 2: ÚNICAMENTE EL NÚMERO (100% puro para copiar en 1 toque sin texto)
+            const msg2 = `<code>${chatId}</code>`;
+            await sendTelegramMessage(chatId, msg2, []);
+
+            // MENSAJE 3: Instrucciones y botones de navegación
+            const msg3 = `👆 <i>Copia el número de arriba y pégalo en la casilla de Telegram al configurar tu placa.</i>\n\n` +
+                         `💡 <i>Puedes usar los botones de abajo o escribir <b>/estado</b> para consultar si hay luz.</i>`;
+            await sendTelegramMessage(chatId, msg3, [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
+                [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
+            ]);
+
+            return res.status(200).send('OK');
         }
 
         return res.status(200).json({
