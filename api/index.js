@@ -335,7 +335,7 @@ app.post('/api/ping', async (req, res) => {
 });
 
 // 2. ENDPOINT WEBHOOK CON RESPUESTA DIRECTA ULTRA-RÁPIDA (POST /api/telegram-webhook)
-app.post('/api/telegram-webhook', (req, res) => {
+app.post('/api/telegram-webhook', async (req, res) => {
     try {
         const update = req.body;
         let chatId = null;
@@ -356,7 +356,7 @@ app.post('/api/telegram-webhook', (req, res) => {
             return res.status(200).send('OK');
         }
 
-        checkBlackoutAlerts();
+        await checkBlackoutAlerts();
 
         let replyMsg = "";
 
