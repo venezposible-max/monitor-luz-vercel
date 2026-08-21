@@ -346,19 +346,33 @@
 
         if (idFromUrl && idFromUrl.trim().toUpperCase() !== 'ESP-DEMO12') {
             currentDeviceId = idFromUrl.trim().toUpperCase();
+            localStorage.setItem('last_active_device_id', currentDeviceId);
         } else {
-            // Consultar a Railway cuál es el dispositivo activo registrado más reciente
-            try {
-                const res = await fetch('/api/devices');
-                const devicesList = await res.json();
-                if (devicesList && devicesList.length > 0) {
-                    currentDeviceId = devicesList[0].deviceId;
-                } else {
+            // Revisar si el usuario ya tenía un dispositivo guardado en su navegador
+            const savedId = localStorage.getItem('last_active_device_id');
+            if (savedId && savedId.trim().length > 0) {
+                currentDeviceId = savedId.trim().toUpperCase();
+            } else {
+                // Consultar al servidor cuál es el dispositivo activo registrado más reciente
+                try {
+                    const res = await fetch('/api/devices');
+                    const devicesList = await res.json();
+                    if (devicesList && devicesList.length > 0) {
+                        currentDeviceId = devicesList[0].deviceId;
+                        localStorage.setItem('last_active_device_id', currentDeviceId);
+                    } else {
+                        currentDeviceId = "ESP-7A562F";
+                    }
+                } catch (e) {
                     currentDeviceId = "ESP-7A562F";
                 }
-            } catch (e) {
-                currentDeviceId = "ESP-7A562F";
             }
+        }
+
+        // Si la URL no tenía el ID, ponérselo limpiamente para guardar en favoritos
+        if (!idFromUrl || idFromUrl !== currentDeviceId) {
+            const newUrl = window.location.pathname + '?id=' + currentDeviceId;
+            window.history.replaceState({path: newUrl}, '', newUrl);
         }
 
         document.getElementById('devIdInput').value = currentDeviceId;
