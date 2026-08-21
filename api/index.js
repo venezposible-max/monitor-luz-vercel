@@ -542,10 +542,16 @@ app.get('/api/status/:id', (req, res) => {
         });
     }
 
+    // Comprobar si este dispositivo específico está offline y no ha sido notificado
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
     const isOnline = elapsedMs < 80000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
+
+    // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
+    if (!isOnline && !device.blackoutNotified && device.chatId) {
+        checkBlackoutAlerts();
+    }
 
     return res.json({
         found: true,
