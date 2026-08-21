@@ -71,6 +71,7 @@ function sendTelegramMessage(chatId, text) {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
                     [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }],
                     [{ text: "🔄 Reiniciar WiFi de la Placa", callback_data: "/reiniciar" }]
                 ]
@@ -94,6 +95,35 @@ function sendTelegramMessage(chatId, text) {
         console.error('Error enviando Telegram:', e);
     }
 }
+
+// Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
+function setupTelegramCommands() {
+    try {
+        const commandsPayload = JSON.stringify({
+            commands: [
+                { command: "estado", description: "Ver si hay luz en tiempo real" },
+                { command: "historial", description: "Ver lista y duración de cortes" },
+                { command: "clima", description: "Ver el clima en tu ciudad" },
+                { command: "reiniciar", description: "Reiniciar WiFi de la placa" }
+            ]
+        });
+
+        const options = {
+            hostname: 'api.telegram.org',
+            path: `/bot${BOT_TOKEN}/setMyCommands`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(commandsPayload)
+            }
+        };
+
+        const req = https.request(options);
+        req.write(commandsPayload);
+        req.end();
+    } catch(e) {}
+}
+setupTelegramCommands();
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico)
 function checkBlackoutAlerts() {
