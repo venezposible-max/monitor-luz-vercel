@@ -395,35 +395,22 @@
         }, 1000);
     }
 
-    // Guardar datos del dispositivo en localStorage para que NUNCA se pierda el historial ni el último reporte
+    // Guardar datos del dispositivo en localStorage
     function cacheDeviceData(deviceId, data) {
         try {
-            const existingCache = getCachedDeviceData(deviceId) || {};
-            const existingHistory = existingCache.history || [];
-            const newHistory = data.history || [];
-
-            // Mezclar historial local con el del servidor para no perder ningún corte
-            const historyMap = new Map();
-            [...existingHistory, ...newHistory].forEach(item => {
-                if (item && item.id) {
-                    historyMap.set(item.id, item);
-                } else if (item && item.start) {
-                    historyMap.set(`event_${item.start}`, item);
-                }
-            });
-            const mergedHistory = Array.from(historyMap.values()).sort((a, b) => b.start - a.start).slice(0, 50);
+            const serverHistory = Array.isArray(data.history) ? data.history : [];
 
             localStorage.setItem(`device_${deviceId}`, JSON.stringify({
-                lastSeen: data.lastSeen || existingCache.lastSeen,
-                onlineSince: data.onlineSince || existingCache.onlineSince,
+                lastSeen: data.lastSeen,
+                onlineSince: data.onlineSince,
                 elapsedMs: data.elapsedMs,
                 uptimeMs: data.uptimeMs,
-                status: data.status || existingCache.status,
-                history: mergedHistory,
+                status: data.status,
+                history: serverHistory,
                 cachedAt: Date.now()
             }));
 
-            return mergedHistory;
+            return serverHistory;
         } catch(e) {
             return data.history || [];
         }
@@ -479,23 +466,14 @@
                 return;
             }
 
-            // Sincronizar y mezclar historial local
-            const mergedHistory = cacheDeviceData(currentDeviceId, data);
-
-            // Si el servidor tiene el historial vacío pero el cliente local tiene cortes guardados, re-sincronizar al servidor
-            if ((!data.history || data.history.length === 0) && mergedHistory.length > 0) {
-                fetch('/api/sync-history', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ deviceId: currentDeviceId, history: mergedHistory })
-                }).catch(() => {});
-            }
+            // Guardar datos recibidos del servidor
+            const serverHistory = cacheDeviceData(currentDeviceId, data);
 
             const lastDate = new Date(data.lastSeen);
             document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-            // Renderizar Historial de Cortes protegido
-            renderHistory(mergedHistory);
+            // Renderizar Historial de Cortes oficial
+            renderHistory(serverHistory);
 
             if (data.elapsedMs < 80000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
