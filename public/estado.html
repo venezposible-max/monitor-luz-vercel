@@ -129,6 +129,12 @@
         .state-offline .pulse-ring { border: 2px solid var(--color-red); animation-duration: 1.5s; }
         .state-offline .status-badge { color: var(--color-red); }
 
+        /* STATE: DESVINCULADO (MODO CONFIGURAR-LUZ) */
+        .state-unlinked .indicator-outer { background: rgba(245, 158, 11, 0.15); }
+        .state-unlinked .indicator-inner { background: #f59e0b; box-shadow: 0 0 35px rgba(245, 158, 11, 0.6); }
+        .state-unlinked .pulse-ring { border: 2px solid #f59e0b; animation-duration: 2s; }
+        .state-unlinked .status-badge { color: #f59e0b; font-size: 1.7rem; }
+
         /* STATE: UNKNOWN */
         .state-loading .indicator-inner { background: var(--color-yellow); }
 
@@ -461,6 +467,15 @@
                 return;
             }
 
+            // Si el dispositivo está desvinculado o reseteado
+            if (data.status === 'unlinked') {
+                renderState('unlinked', 'DISPOSITIVO DESVINCULADO ⚠️', 'La placa fue reseteada o no tiene WiFi asignado. Conéctate a la red <b>"Configurar-Luz"</b> desde tu celular para configurarla.');
+                document.getElementById('uptimeText').textContent = "Esperando configuración";
+                document.getElementById('lastReportText').textContent = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--:--";
+                renderHistory(data.history || []);
+                return;
+            }
+
             // Sincronizar y mezclar historial local
             const mergedHistory = cacheDeviceData(currentDeviceId, data);
 
@@ -627,12 +642,15 @@
         } else if (state === 'offline') {
             card.classList.add('state-offline');
             icon.textContent = '🔌';
+        } else if (state === 'unlinked') {
+            card.classList.add('state-unlinked');
+            icon.textContent = '⚙️';
         } else {
             card.classList.add('state-loading');
             icon.textContent = '❓';
         }
-        badge.textContent = title;
-        msg.textContent = message;
+        badge.innerHTML = title;
+        msg.innerHTML = message;
     }
 
     function generateQRCode() {

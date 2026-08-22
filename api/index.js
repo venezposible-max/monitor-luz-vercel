@@ -330,6 +330,7 @@ app.post('/api/ping', async (req, res) => {
         blackoutStartTime: null,
         history: history,
         resetRequested: false,
+        unlinked: false, // El dispositivo ya está vinculado y reportando
         ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
         updatedAt: new Date(now).toISOString()
     };
@@ -546,6 +547,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
 // 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
 app.post('/api/reset-wifi', (req, res) => {
+    loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const device = getDevice(deviceId);
 
@@ -553,10 +555,27 @@ app.post('/api/reset-wifi', (req, res) => {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
-    if (global.devices[deviceId]) global.devices[deviceId].resetRequested = true;
-    if (global.persistentStore[deviceId]) global.persistentStore[deviceId].resetRequested = true;
+    device.resetRequested = true;
+    device.unlinked = true;
+    persistDevice(deviceId, device);
 
     return res.json({ success: true, message: 'Orden de reinicio registrada.' });
+});
+
+// 3.1 ENDPOINT CUANDO EL DISPOSITIVO SE DESVINCULA (POST /api/device-unlinked)
+app.post('/api/device-unlinked', (req, res) => {
+    loadFromDisk();
+    const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const device = getDevice(deviceId);
+
+    if (device) {
+        device.unlinked = true;
+        device.chatId = '';
+        device.blackoutNotified = false;
+        persistDevice(deviceId, device);
+    }
+
+    return res.json({ success: true, message: 'Dispositivo marcado como desvinculado.' });
 });
 
 // 4. ENDPOINT PARA BORRAR EL HISTORIAL DE UN DISPOSITIVO (POST /api/clear-history)
@@ -599,9 +618,21 @@ app.get('/api/status/:id', async (req, res) => {
         return res.json({
             found: false,
             deviceId: deviceId,
-            status: 'unknown',
-            message: 'El dispositivo no ha registrado ningún reporte todavía.',
+            status: 'unlinked',
+            message: 'DISPOSITIVO DESVINCULADO',
             history: []
+        });
+    }
+
+    // Si el dispositivo fue reseteado o desvinculado
+    if (device.unlinked) {
+        return res.json({
+            found: true,
+            deviceId: deviceId,
+            lastSeen: device.lastSeen,
+            status: 'unlinked',
+            message: 'DISPOSITIVO DESVINCULADO',
+            history: device.history || []
         });
     }
 
