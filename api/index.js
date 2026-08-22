@@ -170,8 +170,8 @@ async function checkBlackoutAlerts() {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado más de 120 segundos sin señal (2 minutos de gracia) y no se ha notificado la ida de luz
-        if (elapsedMs >= 120000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado más de 180 segundos sin señal (3 minutos de gracia sólida) y no se ha notificado la ida de luz
+        if (elapsedMs >= 180000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
@@ -247,9 +247,9 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 120s, o por corte abierto en historial)
+    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 180s, o por corte abierto en historial)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 120000) : false;
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 180000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
@@ -262,7 +262,7 @@ app.post('/api/ping', async (req, res) => {
         } else if (existing.lastSeen) {
             blackoutStart = existing.lastSeen;
         } else {
-            blackoutStart = now - 80000;
+            blackoutStart = now - 180000;
         }
 
         const durationMs = Math.max(now - blackoutStart, 60000);
@@ -646,10 +646,10 @@ app.get('/api/status/:id', async (req, res) => {
         });
     }
 
-    // Comprobar si este dispositivo específico está online (menos de 120s desde el último reporte)
+    // Comprobar si este dispositivo específico está online (menos de 180s desde el último reporte)
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 120000;
+    const isOnline = elapsedMs < 180000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
