@@ -252,14 +252,25 @@ app.post('/api/ping', async (req, res) => {
     const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 80000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
 
-    if (isReturnFromBlackout && existing.lastSeen) {
-        const blackoutStart = existing.blackoutStartTime || existing.lastSeen || (now - 80000);
+    if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
+        // Obtener el momento real del corte:
+        let blackoutStart = null;
+        if (hasOpenCut && history[0].start) {
+            blackoutStart = history[0].start;
+        } else if (existing.blackoutStartTime) {
+            blackoutStart = existing.blackoutStartTime;
+        } else if (existing.lastSeen) {
+            blackoutStart = existing.lastSeen;
+        } else {
+            blackoutStart = now - 80000;
+        }
+
         const durationMs = Math.max(now - blackoutStart, 60000);
-        const totalMins = Math.floor(durationMs / 60000);
+        const totalMins = Math.round(durationMs / 60000);
 
         let durationFormatted = "";
-        if (totalMins < 1) {
-            durationFormatted = "Menos de 1 min";
+        if (totalMins <= 1) {
+            durationFormatted = "1 min";
         } else if (totalMins < 60) {
             durationFormatted = `${totalMins} min`;
         } else {
