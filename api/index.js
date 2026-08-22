@@ -619,4 +619,40 @@ app.get('/api/status/:id', async (req, res) => {
     });
 });
 
+// 8. ENDPOINT DE SINCRONIZACIÓN PERSISTENTE BIDIRECCIONAL (POST /api/sync-history)
+app.post('/api/sync-history', (req, res) => {
+    const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const clientHistory = req.body.history;
+
+    if (!deviceId || !Array.isArray(clientHistory)) {
+        return res.status(400).json({ error: 'Datos inválidos' });
+    }
+
+    const device = getDevice(deviceId);
+    if (device) {
+        const serverHistory = device.history || [];
+        // Combinar eventos del cliente y del servidor sin duplicados
+        const historyMap = new Map();
+        [...serverHistory, ...clientHistory].forEach(item => {
+            if (item && item.id) {
+                historyMap.set(item.id, item);
+            } else if (item && item.start) {
+                historyMap.set(`event_${item.start}`, item);
+            }
+        });
+
+        // Ordenar del más reciente al más antiguo
+        const mergedHistory = Array.from(historyMap.values()).sort((a, b) => b.start - a.start).slice(0, 50);
+
+        device.history = mergedHistory;
+        if (global.devices[deviceId]) global.devices[deviceId].history = mergedHistory;
+        if (global.persistentStore[deviceId]) global.persistentStore[deviceId].history = mergedHistory;
+        persistDevice(deviceId, device);
+
+        return res.json({ success: true, history: mergedHistory });
+    }
+
+    return res.json({ success: false, message: 'Dispositivo no encontrado en memoria' });
+});
+
 module.exports = app;
