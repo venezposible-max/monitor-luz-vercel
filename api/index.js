@@ -27,27 +27,23 @@ const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 const TMP_FILE = '/tmp/monitor-luz-devices.json';
 
 // Guardar datos del dispositivo en archivo /tmp para sobrevivir entre invocaciones
+// Guardar datos del dispositivo en archivo /tmp
 function saveToDisk() {
     try {
-        const combined = { ...global.persistentStore, ...global.devices };
-        fs.writeFileSync(TMP_FILE, JSON.stringify(combined), 'utf8');
+        fs.writeFileSync(TMP_FILE, JSON.stringify(global.persistentStore), 'utf8');
     } catch (e) {
         console.error('Error guardando en /tmp:', e.message);
     }
 }
 
-// Cargar datos del archivo /tmp al iniciar (recupera datos tras cold start parcial)
+// Cargar datos del archivo /tmp al iniciar
 function loadFromDisk() {
     try {
         if (fs.existsSync(TMP_FILE)) {
             const raw = fs.readFileSync(TMP_FILE, 'utf8');
             const data = JSON.parse(raw);
-            for (const [id, dev] of Object.entries(data)) {
-                if (dev && dev.deviceId) {
-                    global.persistentStore[id] = { ...global.persistentStore[id], ...dev };
-                    global.devices[id] = { ...global.devices[id], ...dev };
-                }
-            }
+            global.persistentStore = data || {};
+            global.devices = data || {};
         }
     } catch (e) {
         console.error('Error leyendo /tmp:', e.message);
@@ -63,16 +59,13 @@ function persistDevice(deviceId, data) {
         ...data,
         updatedAt: Date.now()
     };
-    global.devices[deviceId] = {
-        ...data,
-        updatedAt: Date.now()
-    };
+    global.devices[deviceId] = global.persistentStore[deviceId];
     saveToDisk();
 }
 
 function getDevice(deviceId) {
     loadFromDisk();
-    return global.devices[deviceId] || global.persistentStore[deviceId] || null;
+    return global.persistentStore[deviceId] || global.devices[deviceId] || null;
 }
 
 // Función para enviar mensajes de Telegram garantizada (Promise awaitable para serverless)
@@ -197,19 +190,13 @@ async function checkBlackoutAlerts() {
                 });
             }
 
-            if (global.devices[dev.deviceId]) {
-                global.devices[dev.deviceId].blackoutNotified = true;
-                global.devices[dev.deviceId].chatId = devChatId;
-                global.devices[dev.deviceId].blackoutStartTime = dev.lastSeen;
-                global.devices[dev.deviceId].history = dev.history;
-            }
-            if (global.persistentStore[dev.deviceId]) {
-                global.persistentStore[dev.deviceId].blackoutNotified = true;
-                global.persistentStore[dev.deviceId].chatId = devChatId;
-                global.persistentStore[dev.deviceId].blackoutStartTime = dev.lastSeen;
-                global.persistentStore[dev.deviceId].history = dev.history;
-            }
-            saveToDisk();
+            persistDevice(dev.deviceId, {
+                ...dev,
+                blackoutNotified: true,
+                chatId: devChatId,
+                blackoutStartTime: dev.lastSeen,
+                history: dev.history
+            });
 
             const alertMsg = `🔴 <b>¡ALERTA! SE ACABA DE IR LA LUZ 🔌</b>\n\n` +
                              `⏰ <b>Hora aproximada de corte:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
