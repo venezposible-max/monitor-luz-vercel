@@ -444,10 +444,22 @@
             const res = await fetch(`/api/status/${currentDeviceId}`);
             const data = await res.json();
 
-            // Si el servidor perdió la memoria (cold start), usar datos guardados localmente
+            // 1. Si el dispositivo está desvinculado o reseteado (PRIORIDAD MÁXIMA)
+            if (data.status === 'unlinked' || data.unlinked) {
+                try {
+                    localStorage.removeItem(`device_${currentDeviceId}`);
+                } catch(e) {}
+                renderState('unlinked', 'DISPOSITIVO DESVINCULADO ⚠️', 'La placa fue reseteada o no tiene WiFi asignado. Conéctate a la red <b>"Configurar-Luz"</b> desde tu celular para configurarla.');
+                document.getElementById('uptimeText').textContent = "Esperando configuración";
+                document.getElementById('lastReportText').textContent = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--:--";
+                renderHistory([]);
+                return;
+            }
+
+            // 2. Si el servidor perdió la memoria (cold start), usar datos guardados localmente
             if (!data.found) {
                 const cached = getCachedDeviceData(currentDeviceId);
-                if (cached && cached.lastSeen) {
+                if (cached && cached.lastSeen && cached.status !== 'unlinked') {
                     const lastDate = new Date(cached.lastSeen);
                     const now = Date.now();
                     const elapsedMs = now - cached.lastSeen;
@@ -459,20 +471,11 @@
                     document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     renderHistory(cached.history || []);
                 } else {
-                    renderState('offline', 'SE FUE LA LUZ 🔴', 'La placa está desconectada o se interrumpió la energía eléctrica.');
-                    document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+                    renderState('unlinked', 'DISPOSITIVO DESVINCULADO ⚠️', 'La placa no está vinculada. Conéctate a la red <b>"Configurar-Luz"</b> para vincularla.');
+                    document.getElementById('uptimeText').textContent = "Esperando configuración";
                     document.getElementById('lastReportText').textContent = "--:--:--";
                     renderHistory([]);
                 }
-                return;
-            }
-
-            // Si el dispositivo está desvinculado o reseteado
-            if (data.status === 'unlinked') {
-                renderState('unlinked', 'DISPOSITIVO DESVINCULADO ⚠️', 'La placa fue reseteada o no tiene WiFi asignado. Conéctate a la red <b>"Configurar-Luz"</b> desde tu celular para configurarla.');
-                document.getElementById('uptimeText').textContent = "Esperando configuración";
-                document.getElementById('lastReportText').textContent = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--:--";
-                renderHistory(data.history || []);
                 return;
             }
 
