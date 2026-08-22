@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estado de Luz e Internet | Railway</title>
+    <title>CRÉALO PowerWatch | Monitor de Electricidad en Vivo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Monitor Luz">
+    <meta name="apple-mobile-web-app-title" content="PowerWatch">
     <meta name="theme-color" content="#10b981">
     <style>
         :root {
@@ -58,14 +58,56 @@
             max-width: 460px;
         }
 
-        .header-title {
-            text-align: center;
-            font-size: 0.85rem;
-            text-transform: uppercase;
+        .brand-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            gap: 6px;
+        }
+
+        .brand-logo-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-logo-svg {
+            width: 44px;
+            height: 44px;
+            filter: drop-shadow(0 0 12px rgba(249, 115, 22, 0.4));
+        }
+
+        .brand-title-box {
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+        }
+
+        .brand-name {
+            font-size: 1.45rem;
+            font-weight: 900;
             letter-spacing: 2px;
+            color: #ffffff;
+            line-height: 1.1;
+            text-transform: uppercase;
+        }
+
+        .brand-product {
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 3px;
+            color: #f97316;
+            text-transform: uppercase;
+        }
+
+        .brand-tagline {
+            font-size: 0.72rem;
+            letter-spacing: 1.5px;
             color: var(--text-sub);
-            margin-bottom: 20px;
-            font-weight: 700;
+            text-transform: uppercase;
+            font-weight: 600;
         }
 
         /* Glassmorphism Main Status Card */
@@ -255,7 +297,29 @@
 <body>
 
 <div class="container">
-    <div class="header-title">Monitor de Luz e Internet (Railway)</div>
+    <!-- BRAND HEADER: CRÉALO PowerWatch -->
+    <div class="brand-header">
+        <div class="brand-logo-wrap">
+            <svg class="brand-logo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Círculo exterior naranja -->
+                <circle cx="50" cy="50" r="44" stroke="#f97316" stroke-width="7" stroke-dasharray="180 30" stroke-linecap="round"/>
+                <!-- Fondo interior gris oscuro -->
+                <circle cx="50" cy="50" r="38" fill="#1e293b"/>
+                <!-- Reloj / Indicadores de cuadrante -->
+                <circle cx="50" cy="50" r="30" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="2 6"/>
+                <!-- Botón Power Icon -->
+                <path d="M 68 34 A 7 7 0 1 1 61 27" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
+                <line x1="65" y1="23" x2="65" y2="30" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
+                <!-- Rayo Potente Naranja Centrado -->
+                <polygon points="53,16 35,50 49,50 43,84 65,44 51,44" fill="#f97316" filter="drop-shadow(0 0 6px #ea580c)"/>
+            </svg>
+            <div class="brand-title-box">
+                <span class="brand-name">CRÉALO</span>
+                <span class="brand-product">PowerWatch</span>
+            </div>
+        </div>
+        <div class="brand-tagline">Monitor de Electricidad & Internet en Vivo</div>
+    </div>
 
     <div id="statusCard" class="status-card state-loading">
         <div class="indicator-outer">
