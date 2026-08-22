@@ -308,15 +308,25 @@ app.post('/api/ping', async (req, res) => {
         // Limitar historial a los últimos 50 eventos
         if (history.length > 50) history = history.slice(0, 50);
 
-        if (targetChatId) {
-            const returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
-                              `⏰ <b>Hora de regreso:</b> ${returnTimeStr} (${returnDateStr})\n` +
-                              `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
-                              `La energía eléctrica ha regresado a tu casa.\n\n` +
-                              `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+        let returnMsg = "";
+        if (totalMins < 5) {
+            returnMsg = `⚡ <b>¡ENERGÍA / RED NORMALIZADA!</b>\n\n` +
+                        `⏰ <b>Hora de restablecimiento:</b> ${returnTimeStr} (${returnDateStr})\n` +
+                        `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
+                        `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón/fluctuación de voltaje) o una micro-caída momentánea de la red de internet en tu casa.</i>\n\n` +
+                        `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+        } else {
+            returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
+                        `⏰ <b>Hora de regreso:</b> ${returnTimeStr} (${returnDateStr})\n` +
+                        `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
+                        `La energía eléctrica ha regresado a tu casa.\n\n` +
+                        `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+        }
 
-            console.log(`[NOTIF REGRESO] Enviando aviso de regreso de luz a Telegram para ${deviceId} a chatId ${targetChatId}`);
+        if (targetChatId) {
+            console.log(`[NOTIF REGRESO] Enviando aviso a Telegram para ${deviceId} a chatId ${targetChatId}`);
             await sendTelegramMessage(targetChatId, returnMsg);
         }
     }

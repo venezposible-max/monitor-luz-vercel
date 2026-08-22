@@ -539,18 +539,27 @@
         let html = "";
         history.forEach((item, index) => {
             const isOngoing = !item.end;
-            const cardBg = isOngoing ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.03)';
-            const borderCol = isOngoing ? 'rgba(239, 68, 68, 0.35)' : 'rgba(255, 255, 255, 0.06)';
-            const icon = isOngoing ? '🔴' : '⚡';
-            const statusTag = isOngoing 
-                ? `<span style="background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">EN CURSO</span>`
-                : `<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">RESUELTO</span>`;
+            const isFluctuation = !isOngoing && item.durationMs > 0 && item.durationMs < 300000;
+            const cardBg = isOngoing ? 'rgba(239, 68, 68, 0.12)' : (isFluctuation ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)');
+            const borderCol = isOngoing ? 'rgba(239, 68, 68, 0.35)' : (isFluctuation ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.06)');
+            const icon = isOngoing ? '🔴' : (isFluctuation ? '〽️' : '⚡');
+            
+            let statusTag = '';
+            if (isOngoing) {
+                statusTag = `<span style="background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">EN CURSO</span>`;
+            } else if (isFluctuation) {
+                statusTag = `<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">FLUCTUACIÓN / BAJÓN</span>`;
+            } else {
+                statusTag = `<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">CORTE RESUELTO</span>`;
+            }
+
+            const titleLabel = isFluctuation ? `Fluctuación #${history.length - index}` : `Corte #${history.length - index}`;
 
             html += `
                 <div style="background: ${cardBg}; border: 1px solid ${borderCol}; border-radius: 12px; padding: 10px 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 4px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: 700; color: #fff; display: flex; align-items: center; gap: 4px;">
-                            <span>${icon}</span> Corte #${history.length - index}
+                            <span>${icon}</span> ${titleLabel}
                         </span>
                         ${statusTag}
                     </div>
