@@ -588,6 +588,14 @@
         if (!confirmDelete) return;
 
         try {
+            // 1. Limpiar memoria local del navegador inmediatamente
+            try {
+                const cached = getCachedDeviceData(currentDeviceId) || {};
+                cached.history = [];
+                localStorage.setItem(`device_${currentDeviceId}`, JSON.stringify(cached));
+            } catch(e) {}
+
+            // 2. Limpiar en el servidor backend (y en Telegram)
             const res = await fetch('/api/clear-history', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -596,7 +604,7 @@
             const data = await res.json();
             if (res.ok) {
                 renderHistory([]);
-                alert("🗑️ " + (data.message || "Historial borrado exitosamente."));
+                alert("🗑️ " + (data.message || "Historial borrado exitosamente en la web y Telegram."));
             } else {
                 alert("⚠️ Error: " + (data.error || "No se pudo borrar el historial."));
             }

@@ -561,6 +561,7 @@ app.post('/api/reset-wifi', (req, res) => {
 
 // 4. ENDPOINT PARA BORRAR EL HISTORIAL DE UN DISPOSITIVO (POST /api/clear-history)
 app.post('/api/clear-history', (req, res) => {
+    loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const device = getDevice(deviceId);
 
@@ -569,11 +570,9 @@ app.post('/api/clear-history', (req, res) => {
     }
 
     device.history = [];
-    if (global.devices[deviceId]) global.devices[deviceId].history = [];
-    if (global.persistentStore[deviceId]) global.persistentStore[deviceId].history = [];
-    saveToDisk();
+    persistDevice(deviceId, device);
 
-    return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente.` });
+    return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente en la web y Telegram.` });
 });
 
 // 5. ENDPOINT CRON JOB DE VERCEL PARA CHEQUEAR CORTES CADA MINUTO AUTOMÁTICAMENTE
