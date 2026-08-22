@@ -58,7 +58,12 @@ function loadFromDisk() {
 loadFromDisk();
 
 function persistDevice(deviceId, data) {
+    loadFromDisk();
     global.persistentStore[deviceId] = {
+        ...data,
+        updatedAt: Date.now()
+    };
+    global.devices[deviceId] = {
         ...data,
         updatedAt: Date.now()
     };
@@ -66,6 +71,7 @@ function persistDevice(deviceId, data) {
 }
 
 function getDevice(deviceId) {
+    loadFromDisk();
     return global.devices[deviceId] || global.persistentStore[deviceId] || null;
 }
 
