@@ -170,8 +170,8 @@ async function checkBlackoutAlerts() {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado más de 80 segundos sin señal y no se ha notificado la ida de luz
-        if (elapsedMs >= 80000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado más de 120 segundos sin señal (2 minutos de gracia) y no se ha notificado la ida de luz
+        if (elapsedMs >= 120000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
@@ -247,9 +247,9 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 80s, o por corte abierto en historial)
+    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 120s, o por corte abierto en historial)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 80000) : false;
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 120000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
@@ -646,10 +646,10 @@ app.get('/api/status/:id', async (req, res) => {
         });
     }
 
-    // Comprobar si este dispositivo específico está offline y no ha sido notificado
+    // Comprobar si este dispositivo específico está online (menos de 120s desde el último reporte)
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 80000;
+    const isOnline = elapsedMs < 120000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
