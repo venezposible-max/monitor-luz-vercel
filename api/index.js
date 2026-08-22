@@ -43,11 +43,11 @@ function loadFromDisk() {
             const raw = fs.readFileSync(TMP_FILE, 'utf8');
             const data = JSON.parse(raw);
             for (const [id, dev] of Object.entries(data)) {
-                if (!global.devices[id] && !global.persistentStore[id]) {
-                    global.persistentStore[id] = dev;
+                if (dev && dev.deviceId) {
+                    global.persistentStore[id] = { ...global.persistentStore[id], ...dev };
+                    global.devices[id] = { ...global.devices[id], ...dev };
                 }
             }
-            console.log('[DISK] Datos recuperados de /tmp:', Object.keys(data).length, 'dispositivos');
         }
     } catch (e) {
         console.error('Error leyendo /tmp:', e.message);
@@ -337,17 +337,18 @@ app.post('/api/ping', async (req, res) => {
 // 2. ENDPOINT WEBHOOK CON RESPUESTA DIRECTA ULTRA-RÁPIDA (POST /api/telegram-webhook)
 app.post('/api/telegram-webhook', async (req, res) => {
     try {
+        loadFromDisk();
         const update = req.body;
         let chatId = null;
         let text = "";
         let senderName = "Usuario";
 
         if (update && update.callback_query) {
-            chatId = update.callback_query.message.chat.id;
+            chatId = (update.callback_query.message.chat.id || '').toString();
             text = (update.callback_query.data || '').toLowerCase().trim();
             senderName = update.callback_query.from ? (update.callback_query.from.first_name || 'Usuario') : 'Usuario';
         } else if (update && update.message && update.message.chat) {
-            chatId = update.message.chat.id;
+            chatId = (update.message.chat.id || '').toString();
             text = (update.message.text || '').toLowerCase().trim();
             senderName = update.message.from ? (update.message.from.first_name || 'Usuario') : 'Usuario';
         }
@@ -356,13 +357,15 @@ app.post('/api/telegram-webhook', async (req, res) => {
             return res.status(200).send('OK');
         }
 
+        global.lastInteractedChatId = chatId;
+
         await checkBlackoutAlerts();
 
         let replyMsg = "";
 
         if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
-            const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length === 1 ? allDevs[0] : null);
+            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
 
             const cityName = "Maracay, Aragua";
             const temp = 26;
@@ -371,7 +374,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             const now = Date.now();
             const isOnline = userDev ? ((now - userDev.lastSeen) < 80000) : false;
-            const devId = userDev ? userDev.deviceId : 'ESP-7A562F';
+            const devId = userDev ? userDev.deviceId : 'ESP-51A1B1';
 
             replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN VIVO</b>\n\n` +
                        `📍 <b>Ubicación:</b> ${cityName}\n` +
@@ -382,10 +385,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                        `💡 <i>Puedes consultar otra ciudad escribiendo por ejemplo: <b>/clima valencia</b></i>`;
         } else if (text.includes('/reiniciar')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices });
-            const userDev = allDevs.find(d => d.chatId == chatId);
+            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
             if (userDev) {
                 if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].resetRequested = true;
                 if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].resetRequested = true;
+                saveToDisk();
                 replyMsg = `🔄 <b>Orden de reinicio enviada a:</b> <code>${userDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`;
             } else {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
@@ -394,12 +398,13 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const now = Date.now();
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
             
-            let userDev = allDevs.find(d => d.chatId == chatId);
+            let userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim());
             if (!userDev && allDevs.length > 0) {
                 userDev = allDevs[0];
                 userDev.chatId = chatId;
                 if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].chatId = chatId;
                 if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].chatId = chatId;
+                saveToDisk();
             }
 
             if (!userDev) {
@@ -451,7 +456,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes') || text.includes('registro')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
-            const userDev = allDevs.find(d => d.chatId == chatId) || (allDevs.length > 0 ? allDevs[0] : null);
+            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
 
             if (!userDev) {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
