@@ -157,17 +157,18 @@ function setupTelegramCommands() {
 }
 setupTelegramCommands();
 
-// Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico)
+// Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
 async function checkBlackoutAlerts() {
+    loadFromDisk();
     const now = Date.now();
     const combined = { ...global.persistentStore, ...global.devices };
 
     for (const dev of Object.values(combined)) {
-        if (!dev.lastSeen) continue;
+        if (!dev.lastSeen || !dev.deviceId) continue;
         const elapsedMs = now - dev.lastSeen;
 
-        let devChatId = dev.chatId || global.lastInteractedChatId || '330749449';
-        if (devChatId === '3307499449') devChatId = '330749449';
+        let devChatId = (dev.chatId || '').toString().trim();
+        if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
         // Si han pasado más de 80 segundos sin señal y no se ha notificado la ida de luz
         if (elapsedMs >= 80000 && !dev.blackoutNotified && devChatId) {
@@ -224,6 +225,7 @@ async function checkBlackoutAlerts() {
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', async (req, res) => {
+    loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
     const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
@@ -242,8 +244,6 @@ app.post('/api/ping', async (req, res) => {
 
     // Sanitizar typo común de chatId
     if (targetChatId === '3307499449') targetChatId = '330749449';
-    if (!targetChatId && global.lastInteractedChatId) targetChatId = global.lastInteractedChatId;
-    if (!targetChatId) targetChatId = '330749449'; // Default fallback chat ID
 
     let history = existing.history || [];
 
@@ -380,7 +380,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             const now = Date.now();
             const isOnline = userDev ? ((now - userDev.lastSeen) < 80000) : false;
-            const devId = userDev ? userDev.deviceId : 'ESP-51A1B1';
+            const devId = userDev ? userDev.deviceId : (allDevs.length > 0 ? allDevs[0].deviceId : 'ESP-DISPOSITIVO');
 
             replyMsg = `🌤️ <b>ESTADO DEL CLIMA EN VIVO</b>\n\n` +
                        `📍 <b>Ubicación:</b> ${cityName}\n` +
