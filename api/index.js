@@ -597,6 +597,63 @@ app.post('/api/telegram-webhook', async (req, res) => {
         // Ejecutar chequeo de alertas en segundo plano para no bloquear la velocidad de respuesta al usuario
         checkBlackoutAlerts().catch(e => console.error('Error background checkBlackoutAlerts:', e));
 
+        const cleanText = (update.message && update.message.text ? update.message.text : text).trim();
+
+        // 1. SI EL USUARIO TIENE UNA ACCIÓN PENDIENTE (RECORRER PRIMERO):
+        // A) AGREGAR UN FAMILIAR / INVITADO (Recibe número de Chat ID)
+        global.pendingGuestAddForChat = global.pendingGuestAddForChat || {};
+        const guestDevId = global.pendingGuestAddForChat[chatId];
+        if (guestDevId && cleanText.length > 0 && /^\d+$/.test(cleanText)) {
+            delete global.pendingGuestAddForChat[chatId];
+            const newGuestChatId = cleanText;
+            const existingDev = getDevice(guestDevId) || { deviceId: guestDevId };
+            existingDev.guestChatIds = existingDev.guestChatIds || [];
+            if (!existingDev.guestChatIds.includes(newGuestChatId)) {
+                existingDev.guestChatIds.push(newGuestChatId);
+            }
+            persistDevice(guestDevId, existingDev);
+
+            const msgOk = `✅ <b>¡Familiar / Invitado agregado con éxito!</b>\n\n` +
+                         `👥 <b>Chat ID:</b> <code>${newGuestChatId}</code>\n` +
+                         `📍 <b>Monitor:</b> <b>${existingDev.alias || guestDevId}</b>\n\n` +
+                         `Ahora este familiar también recibirá todas las alertas de luz e internet al mismo tiempo.`;
+            await sendTelegramMessage(chatId, msgOk, [
+                [{ text: "👥 Ver Familiares", callback_data: "/invitar" }],
+                [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${guestDevId}` }]
+            ]);
+
+            // Enviar confirmación al familiar invitado
+            await sendTelegramMessage(newGuestChatId, `🎉 <b>¡Has sido agregado como Familiar Autorizado!</b>\n\nAhora recibirás las alertas de luz y reconexión de <b>${existingDev.alias || guestDevId}</b>.`, [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${guestDevId}` }]
+            ]);
+
+            return res.status(200).send('OK');
+        }
+
+        // B) RENOMBRAR UNA CASA (Recibe texto con el nombre)
+        global.pendingRenameForChat = global.pendingRenameForChat || {};
+        const targetDevId = global.pendingRenameForChat[chatId];
+        if (targetDevId && cleanText.length > 0 && !cleanText.startsWith('/')) {
+            delete global.pendingRenameForChat[chatId];
+            const existingDev = getDevice(targetDevId) || { deviceId: targetDevId };
+            const newName = cleanText;
+            global.aliases[targetDevId] = newName;
+            const updatedDev = {
+                ...existingDev,
+                deviceId: targetDevId,
+                alias: newName,
+                chatId: chatId || existingDev.chatId
+            };
+            persistDevice(targetDevId, updatedDev);
+
+            const msgOk = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDevId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
+            await sendTelegramMessage(chatId, msgOk, [
+                [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${targetDevId}` }],
+                [{ text: "🏠 Ver Mis Monitores", callback_data: "/casas" }]
+            ]);
+            return res.status(200).send('OK');
+        }
+
         let replyMsg = "";
 
         if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
@@ -956,62 +1013,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             return res.status(200).send('OK');
         } else {
-            // Si el usuario tenía seleccionado agregar un invitado:
-            global.pendingGuestAddForChat = global.pendingGuestAddForChat || {};
-            const guestDevId = global.pendingGuestAddForChat[chatId];
-            const cleanText = (update.message && update.message.text ? update.message.text : text).trim();
-
-            if (guestDevId && cleanText.length > 0 && /^\d+$/.test(cleanText)) {
-                delete global.pendingGuestAddForChat[chatId];
-                const newGuestChatId = cleanText;
-                const existingDev = getDevice(guestDevId) || { deviceId: guestDevId };
-                existingDev.guestChatIds = existingDev.guestChatIds || [];
-                if (!existingDev.guestChatIds.includes(newGuestChatId)) {
-                    existingDev.guestChatIds.push(newGuestChatId);
-                }
-                persistDevice(guestDevId, existingDev);
-
-                const msgOk = `✅ <b>¡Familiar / Invitado agregado con éxito!</b>\n\n` +
-                             `👥 <b>Chat ID:</b> <code>${newGuestChatId}</code>\n` +
-                             `📍 <b>Monitor:</b> <b>${existingDev.alias || guestDevId}</b>\n\n` +
-                             `Ahora este familiar también recibirá todas las alertas de luz e internet al mismo tiempo.`;
-                await sendTelegramMessage(chatId, msgOk, [
-                    [{ text: "👥 Ver Familiares", callback_data: "/invitar" }],
-                    [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${guestDevId}` }]
-                ]);
-
-                // Enviar confirmación al familiar invitado
-                await sendTelegramMessage(newGuestChatId, `🎉 <b>¡Has sido agregado como Familiar Autorizado!</b>\n\nAhora recibirás las alertas de luz y reconexión de <b>${existingDev.alias || guestDevId}</b>.`, [
-                    [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${guestDevId}` }]
-                ]);
-
-                return res.status(200).send('OK');
-            }
-
-            // Si el usuario tenía seleccionado un monitor para renombrar:
-            global.pendingRenameForChat = global.pendingRenameForChat || {};
-            const targetDevId = global.pendingRenameForChat[chatId];
-            if (targetDevId && text.trim().length > 0) {
-                delete global.pendingRenameForChat[chatId];
-                const existingDev = getDevice(targetDevId) || { deviceId: targetDevId };
-                const newName = text.trim();
-                global.aliases[targetDevId] = newName;
-                const updatedDev = {
-                    ...existingDev,
-                    deviceId: targetDevId,
-                    alias: newName,
-                    chatId: chatId || existingDev.chatId
-                };
-                persistDevice(targetDevId, updatedDev);
-
-                const msgOk = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDevId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
-                await sendTelegramMessage(chatId, msgOk, [
-                    [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${targetDevId}` }],
-                    [{ text: "🏠 Ver Mis Monitores", callback_data: "/casas" }]
-                ]);
-                return res.status(200).send('OK');
-            }
-
             if (replyMsg) {
                 await sendTelegramMessage(chatId, replyMsg, [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
