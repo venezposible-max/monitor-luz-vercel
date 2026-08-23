@@ -320,9 +320,10 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por bandera wasBlackout o por corte abierto en historial)
+    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 5 min)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const isReturnFromBlackout = wasBlackout || hasOpenCut;
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 300000) : false;
+    const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
     // Prioridad estricta de alias: preservar siempre el alias guardado previamente
