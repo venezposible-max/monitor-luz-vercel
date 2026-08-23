@@ -594,8 +594,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 if (targetDev && newName) {
                     targetDev.alias = newName;
                     persistDevice(targetDev.deviceId, targetDev);
-                    replyMsg = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
-                    await sendTelegramMessage(chatId, replyMsg, [
+                    const msgOk = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
+                    await sendTelegramMessage(chatId, msgOk, [
                         [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${targetDev.deviceId}` }],
                         [{ text: "🏠 Ver Mis Monitores", callback_data: "/casas" }]
                     ]);
@@ -603,9 +603,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 }
             }
 
-            // Si el usuario solo tocó el botón "Asignar Nombre" o escribió /renombrar o /nombre: Mostrar botonera interactiva
+            // Si el usuario tocó "Asignar o Renombrar Casas": Mostrar lista interactiva pura
             if (allDevs.length === 0) {
-                replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
+                await sendTelegramMessage(chatId, `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`, []);
+                return res.status(200).send('OK');
             } else {
                 let listText = `🏷️ <b>¿A cuál de tus monitores deseas cambiarle el nombre?</b>\n\n`;
                 const buttons = [];
