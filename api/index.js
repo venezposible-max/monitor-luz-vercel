@@ -212,6 +212,32 @@ function sendTelegramMessage(chatId, text, customButtons = null) {
     });
 }
 
+// Función para confirmar a Telegram que un botón fue presionado (quita el relojito de carga)
+function answerCallbackQuery(callbackQueryId) {
+    if (!callbackQueryId) return Promise.resolve(false);
+    return new Promise((resolve) => {
+        try {
+            const payload = JSON.stringify({ callback_query_id: callbackQueryId });
+            const options = {
+                hostname: 'api.telegram.org',
+                path: `/bot${BOT_TOKEN}/answerCallbackQuery`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            };
+            const request = https.request(options, () => resolve(true));
+            request.setTimeout(2000, () => { request.destroy(); resolve(false); });
+            request.on('error', () => resolve(false));
+            request.write(payload);
+            request.end();
+        } catch (e) {
+            resolve(false);
+        }
+    });
+}
+
 // Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
 // Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
 function setupTelegramCommands() {
@@ -583,6 +609,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             chatId = (update.callback_query.message.chat.id || '').toString();
             text = (update.callback_query.data || '').toLowerCase().trim();
             senderName = update.callback_query.from ? (update.callback_query.from.first_name || 'Usuario') : 'Usuario';
+            
+            // Notificar a Telegram de inmediato para quitar el relojito/cargando del botón
+            if (update.callback_query.id) {
+                answerCallbackQuery(update.callback_query.id).catch(() => {});
+            }
         } else if (update && update.message && update.message.chat) {
             chatId = (update.message.chat.id || '').toString();
             text = (update.message.text || '').toLowerCase().trim();
