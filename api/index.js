@@ -284,9 +284,15 @@ async function checkBlackoutAlerts() {
                 history: dev.history
             });
 
-            const alertMsg = `🔴 <b>¡ALERTA! SE ACABA DE IR LA LUZ 🔌</b>\n\n` +
-                             `⏰ <b>Hora aproximada de corte:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
-                             `Tu dispositivo ha dejado de transmitir señal por corte de energía eléctrica en tu casa.\n\n` +
+            const alertMsg = `⚠️ <b>¡ALERTA DE DESCONEXIÓN! 🔌🌐</b>\n\n` +
+                             `📍 <b>Ubicación:</b> <code>${dev.alias || dev.deviceId}</code>\n` +
+                             `⏰ <b>Hora aproximada del evento:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
+                             `Tu dispositivo ha dejado de transmitir señal.\n` +
+                             `💡 <i>Esto puede deberse a:</i>\n` +
+                             `  1️⃣ <b>Corte de Energía Eléctrica (Falla de luz)</b>\n` +
+                             `  2️⃣ <b>Caída del Servicio de Internet (CANTV/Fibra)</b>\n` +
+                             `  3️⃣ <b>O ambos eventos simultáneamente</b>\n\n` +
+                             `🔍 <i>La causa exacta se determinará y confirmará automáticamente en tu reporte al restablecerse la conexión.</i>\n\n` +
                              `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
                              `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
 
