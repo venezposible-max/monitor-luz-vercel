@@ -44,10 +44,13 @@ function loadFromDisk() {
             const data = JSON.parse(raw);
             if (data && Object.keys(data).length > 0) {
                 Object.keys(data).forEach(id => {
+                    const savedAlias = data[id].alias;
+                    const memoryAlias = global.persistentStore[id] ? global.persistentStore[id].alias : null;
+                    const validAlias = (savedAlias && savedAlias !== id) ? savedAlias : ((memoryAlias && memoryAlias !== id) ? memoryAlias : (savedAlias || memoryAlias || id));
                     global.persistentStore[id] = {
                         ...(global.persistentStore[id] || {}),
                         ...data[id],
-                        alias: data[id].alias || (global.persistentStore[id] ? global.persistentStore[id].alias : id)
+                        alias: validAlias
                     };
                 });
                 global.devices = { ...global.persistentStore };
@@ -316,9 +319,13 @@ app.post('/api/ping', async (req, res) => {
     let history = existing.history || [];
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
-    // Prioridad estricta de alias: preservar siempre el alias guardado previamente
+    // Prioridad estricta de alias: preservar siempre el alias personalizado guardado previamente
     const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
-    const deviceAlias = existing.alias || (incomingAlias && incomingAlias !== deviceId ? incomingAlias : deviceId);
+    const existingAlias = existing.alias;
+    let deviceAlias = existingAlias;
+    if (!deviceAlias || deviceAlias === deviceId) {
+        deviceAlias = (incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId;
+    }
 
     // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 5 min)
     const hasOpenCut = history.length > 0 && !history[0].end;
@@ -435,7 +442,7 @@ app.post('/api/ping', async (req, res) => {
 
     const devData = {
         deviceId: deviceId,
-        alias: existing.alias || deviceAlias,
+        alias: deviceAlias,
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: targetChatId,
