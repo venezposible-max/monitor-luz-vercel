@@ -743,6 +743,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
+            await sendTelegramMessage(chatId, replyMsg, [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
+            ]);
+            return res.status(200).send('OK');
         } else if (text.includes('/reporte') || text.includes('reporte') || text.includes('/resumen') || text.includes('resumen') || text.includes('semanal')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
             const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
@@ -752,6 +757,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 replyMsg = buildWeeklyReport(userDev);
             }
+            await sendTelegramMessage(chatId, replyMsg, [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "📜 Ver Historial", callback_data: "/historial" }]
+            ]);
+            return res.status(200).send('OK');
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
             let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
