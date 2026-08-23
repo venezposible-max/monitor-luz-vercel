@@ -573,6 +573,7 @@ app.post('/api/ping', async (req, res) => {
 app.post('/api/telegram-webhook', async (req, res) => {
     try {
         loadFromDisk();
+        await loadFromCloud();
         const update = req.body;
         let chatId = null;
         let text = "";
