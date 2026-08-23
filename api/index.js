@@ -516,12 +516,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
             }
-        } else if (text.startsWith('/nombre') || text.startsWith('nombre') || text.startsWith('/renombrar')) {
+        } else if (text.includes('/nombre') || text.includes('nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             const parts = text.split(' ').filter(p => p.trim().length > 0);
 
             // Si el usuario escribió directamente: /nombre ESP-51A1B1 Casa Caracas o /nombre Casa Caracas
-            if (parts.length >= 2) {
+            if (parts.length >= 2 && !text.includes('/renombrar')) {
                 let targetDev = null;
                 let newName = "";
 
@@ -545,7 +545,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 }
             }
 
-            // Si el usuario solo tocó el botón "Asignar Nombre": Mostrar botonera de selección interactiva
+            // Si el usuario solo tocó el botón "Asignar Nombre" o escribió /renombrar o /nombre: Mostrar botonera interactiva
             if (allDevs.length === 0) {
                 replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
             } else {
@@ -566,7 +566,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             replyMsg = `✏️ <b>Renombrar monitor:</b> <code>${currentName}</code> (<code>${devId}</code>)\n\n` +
                        `Por favor, escribe el nuevo nombre en este formato:\n\n` +
                        `<code>/nombre ${devId} Casa Caracas</code>\n\n` +
-                       `<i>(O simplemente escribe <b>/nombre NombreDeseado</b> si es tu única placa).</i>`;
+                       `<i>(O simplemente escribe <b>/nombre MiNombre</b> si es tu única placa).</i>`;
             await sendTelegramMessage(chatId, replyMsg, []);
             return res.status(200).send('OK');
         } else if (text.startsWith('/estado_')) {
@@ -613,7 +613,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 [{ text: "📜 Ver Historial", callback_data: "/historial" }]
             ]);
             return res.status(200).send('OK');
-        } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas')) {
+        } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas') || text.includes('monitores')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             if (allDevs.length === 0) {
                 replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
@@ -627,7 +627,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     listText += `• <b>${name}</b> (<code>${dev.deviceId}</code>): ${statusIcon}\n`;
                     buttons.push([{ text: `📍 Consultar ${name}`, callback_data: `/estado_${dev.deviceId}` }]);
                 });
-                buttons.push([{ text: "✏️ Cambiar Nombre a un Monitor", callback_data: "/nombre" }]);
+                buttons.push([{ text: "✏️ Cambiar Nombre a un Monitor", callback_data: "/renombrar" }]);
                 await sendTelegramMessage(chatId, listText, buttons);
                 return res.status(200).send('OK');
             }
