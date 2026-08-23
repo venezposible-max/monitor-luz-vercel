@@ -334,6 +334,82 @@ function buildWeeklyReport(device) {
            `🔗 <b>Ver Monitor Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${device.deviceId}`;
 }
 
+// Helper: construir mensaje de estado de un dispositivo
+function buildStatusMsg(dev, devId) {
+    if (!dev) return `⚠️ <b>Dispositivo no encontrado:</b> <code>${devId || 'ESP-DESCONOCIDO'}</code>`;
+    const now = Date.now();
+    const lastSeen = dev.lastSeen || now;
+    const elapsed = now - lastSeen;
+    const online = elapsed < 240000;
+    const name = dev.alias || dev.deviceId || devId;
+    if (online) {
+        const up = now - (dev.onlineSince || lastSeen);
+        const h = Math.floor(up / 3600000);
+        const m = Math.floor((up % 3600000) / 60000);
+        const uptimeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+        return `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
+               `📍 <b>Ubicación:</b> ${name}\n` +
+               `📱 <b>ID:</b> <code>${dev.deviceId || devId}</code>\n` +
+               `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
+               `📡 <b>Último reporte:</b> Hace ${Math.max(0, Math.floor(elapsed / 1000))} segundos\n\n` +
+               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId || devId}`;
+    } else {
+        const mins = Math.floor(elapsed / 60000);
+        const t = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h y ${mins % 60}m`;
+        const dt = new Date(lastSeen);
+        const ts = dt.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+        const ds = dt.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
+        return `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
+               `📍 <b>Ubicación:</b> ${name}\n` +
+               `📱 <b>ID:</b> <code>${dev.deviceId || devId}</code>\n` +
+               `🕐 <b>Último reporte:</b> ${ts} (${ds})\n` +
+               `⏱️ <b>Tiempo sin luz:</b> ${t}\n\n` +
+               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId || devId}`;
+    }
+}
+
+// Helper: construir mensaje de historial
+function buildHistoryMsg(dev) {
+    if (!dev) return '⚠️ <b>Dispositivo no encontrado.</b>';
+    const name = dev.alias || dev.deviceId;
+    const history = dev.history || [];
+    if (history.length === 0) {
+        return `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
+               `📍 <b>Ubicación:</b> <b>${name}</b>\n` +
+               `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n\n` +
+               `✨ <i>No hay registros de cortes de luz almacenados. ¡El suministro ha estado estable!</i>\n\n` +
+               `🔗 <b>Ver en Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
+    }
+    let historyListText = "";
+    const maxShow = Math.min(history.length, 5);
+    for (let i = 0; i < maxShow; i++) {
+        const h = history[i];
+        let icon = "⚡";
+        let tagLabel = "Corte Eléctrico";
+        if (!h.end) {
+            icon = "🔴";
+            tagLabel = "En Curso";
+        } else if (h.type === 'internet_drop') {
+            icon = "🌐";
+            tagLabel = "Caída de Internet";
+        } else if (h.type === 'fluctuation') {
+            icon = "〽️";
+            tagLabel = "Fluctuación / Bajón";
+        }
+
+        historyListText += `${icon} <b>${tagLabel} #${history.length - i}:</b>\n` +
+                           `   • <b>Inicio:</b> ${h.startTimeStr || 'N/A'} (${h.startDateStr || 'N/A'})\n` +
+                           `   • <b>Fin:</b> ${h.endTimeStr ? `${h.endTimeStr} (${h.endDateStr || ''})` : '<i>En curso...</i>'}\n` +
+                           `   • <b>Duración:</b> <code>${h.durationStr || 'N/A'}</code>\n\n`;
+    }
+
+    return `📜 <b>HISTORIAL DE EVENTOS</b>\n\n` +
+           `📍 <b>Ubicación:</b> <b>${name}</b>\n` +
+           `📊 <b>Total de eventos registrados:</b> ${history.length}\n\n` +
+           historyListText +
+           `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
+}
+
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
 async function checkBlackoutAlerts() {
     loadFromDisk();
