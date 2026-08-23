@@ -808,10 +808,15 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const targetDevId = global.pendingRenameForChat[chatId];
             if (targetDevId && text.trim().length > 0) {
                 delete global.pendingRenameForChat[chatId];
-                const targetDev = getDevice(targetDevId) || { deviceId: targetDevId };
+                const existingDev = getDevice(targetDevId) || { deviceId: targetDevId };
                 const newName = text.trim();
-                targetDev.alias = newName;
-                persistDevice(targetDevId, targetDev);
+                const updatedDev = {
+                    ...existingDev,
+                    deviceId: targetDevId,
+                    alias: newName,
+                    chatId: chatId || existingDev.chatId
+                };
+                persistDevice(targetDevId, updatedDev);
 
                 const msgOk = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDevId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
                 await sendTelegramMessage(chatId, msgOk, [
