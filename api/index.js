@@ -19,6 +19,25 @@ app.get('/estado', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
+const { Redis } = require('@upstash/redis');
+
+// Inicializar cliente de Redis (Upstash) si las variables de entorno están presentes
+let redis = null;
+const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+if (redisUrl && redisToken) {
+    try {
+        redis = new Redis({
+            url: redisUrl,
+            token: redisToken,
+        });
+        console.log('[REDIS] Cliente Upstash Redis inicializado correctamente.');
+    } catch (e) {
+        console.error('[REDIS ERROR] Error inicializando Redis:', e.message);
+    }
+}
+
 // Memoria compartida en Vercel
 global.devices = global.devices || {};
 global.persistentStore = global.persistentStore || {};
@@ -28,7 +47,7 @@ const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 const TMP_FILE = '/tmp/monitor-luz-devices.json';
 const ALIAS_FILE = '/tmp/monitor-luz-aliases.json';
 
-// Guardar datos del dispositivo y alias en archivos /tmp
+// Guardar datos del dispositivo y alias en archivos /tmp y Redis en la nube
 function saveToDisk() {
     try {
         fs.writeFileSync(TMP_FILE, JSON.stringify(global.persistentStore), 'utf8');
@@ -36,9 +55,18 @@ function saveToDisk() {
     } catch (e) {
         console.error('Error guardando en /tmp:', e.message);
     }
+
+    if (redis) {
+        try {
+            redis.set('global_aliases', JSON.stringify(global.aliases)).catch(err => console.error('[REDIS ALIAS SAVE ERROR]:', err.message));
+            redis.set('global_persistent_store', JSON.stringify(global.persistentStore)).catch(err => console.error('[REDIS STORE SAVE ERROR]:', err.message));
+        } catch (e) {
+            console.error('[REDIS SAVE ERROR]:', e.message);
+        }
+    }
 }
 
-// Cargar datos del archivo /tmp al iniciar
+// Cargar datos del archivo /tmp y de Redis en la nube al iniciar
 function loadFromDisk() {
     try {
         if (fs.existsSync(ALIAS_FILE)) {
@@ -75,8 +103,41 @@ function loadFromDisk() {
     }
 }
 
+// Cargar datos de la nube (Upstash Redis)
+async function loadFromCloud() {
+    if (!redis) return;
+    try {
+        const cloudAliasesRaw = await redis.get('global_aliases');
+        if (cloudAliasesRaw) {
+            const cloudAliases = typeof cloudAliasesRaw === 'string' ? JSON.parse(cloudAliasesRaw) : cloudAliasesRaw;
+            if (cloudAliases && typeof cloudAliases === 'object') {
+                global.aliases = { ...global.aliases, ...cloudAliases };
+            }
+        }
+
+        const cloudStoreRaw = await redis.get('global_persistent_store');
+        if (cloudStoreRaw) {
+            const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
+            if (cloudStore && typeof cloudStore === 'object') {
+                Object.keys(cloudStore).forEach(id => {
+                    const aliasName = global.aliases[id] || cloudStore[id].alias || id;
+                    global.persistentStore[id] = {
+                        ...(global.persistentStore[id] || {}),
+                        ...cloudStore[id],
+                        alias: aliasName
+                    };
+                });
+                global.devices = { ...global.persistentStore };
+            }
+        }
+    } catch (e) {
+        console.error('[REDIS LOAD ERROR]:', e.message);
+    }
+}
+
 // Cargar datos al arrancar
 loadFromDisk();
+loadFromCloud().catch(err => console.error('Cloud load error:', err));
 
 function persistDevice(deviceId, data) {
     loadFromDisk();
