@@ -517,7 +517,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
             }
         } else if (text.includes('/nombre') || text.includes('nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
+            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
+            if (allDevs.length === 0 && combinedDevs.length > 0) {
+                allDevs = [combinedDevs[0]];
+            }
             const parts = text.split(' ').filter(p => p.trim().length > 0);
 
             // Si el usuario escribió directamente: /nombre ESP-51A1B1 Casa Caracas o /nombre Casa Caracas
