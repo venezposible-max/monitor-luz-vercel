@@ -360,14 +360,14 @@ app.post('/api/ping', async (req, res) => {
         const returnDateStr = returnDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
 
         // DISCRIMINACIÓN: ¿Fue corte eléctrico, caída de internet, o fluctuación?
-        // Si el uptime de la placa es mayor a la duración del corte o tiene pings guardados en RAM -> La luz nunca se fue, solo cayó el internet
-        const isOnlyInternetDrop = (boardUptimeMs > (durationMs - 30000)) || (offlinePings >= 2);
+        // Si el uptime de la placa es mayor a la duración del corte o tiene más de 5 pings acumulados en RAM -> La luz nunca se fue, solo cayó el internet
+        const isOnlyInternetDrop = (boardUptimeMs > durationMs) || (offlinePings > 5);
         
         let eventType = 'power_outage';
-        if (isOnlyInternetDrop) {
-            eventType = 'internet_drop';
-        } else if (totalMins < 5) {
+        if (totalMins < 5) {
             eventType = 'fluctuation';
+        } else if (isOnlyInternetDrop) {
+            eventType = 'internet_drop';
         }
 
         // Actualizar el último corte en el historial
