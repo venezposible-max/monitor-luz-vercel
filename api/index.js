@@ -932,28 +932,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 [{ text: "📜 Ver Historial", callback_data: "/historial" }]
             ]);
             return res.status(200).send('OK');
-        } else if (text.includes('/invitar') || text.includes('invitar') || text.includes('familiar') || text.includes('invitado')) {
-            const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
-            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
-            if (allDevs.length === 0) {
-                await sendTelegramMessage(chatId, `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`, []);
-                return res.status(200).send('OK');
-            } else {
-                let listText = `👥 <b>GESTIÓN DE FAMILIARES E INVITADOS</b>\n\n` +
-                               `Selecciona el monitor al que deseas agregar un familiar para que reciba las alertas de luz:\n\n`;
-                const buttons = [];
-                allDevs.forEach(dev => {
-                    const currentName = dev.alias || dev.deviceId;
-                    const guestsCount = (dev.guestChatIds || []).length;
-                    listText += `• <b>${currentName}</b> (<code>${dev.deviceId}</code>) — ${guestsCount} invitado(s)\n`;
-                    buttons.push([{ text: `➕ Agregar Familiar a ${currentName}`, callback_data: `/pedirinvitado_${dev.deviceId}` }]);
-                    if (guestsCount > 0) {
-                        buttons.push([{ text: `❌ Quitar Invitados de ${currentName}`, callback_data: `/quitarinvitado_${dev.deviceId}` }]);
-                    }
-                });
-                await sendTelegramMessage(chatId, listText, buttons);
-                return res.status(200).send('OK');
-            }
         } else if (text.startsWith('/pedirinvitado_')) {
             const devId = text.replace('/pedirinvitado_', '').toUpperCase().trim();
             const targetDev = getDevice(devId) || { deviceId: devId };
@@ -978,6 +956,28 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 ]);
             }
             return res.status(200).send('OK');
+        } else if (text.includes('/invitar') || text.includes('invitar') || text.includes('familiar') || text.includes('invitado')) {
+            const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
+            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
+            if (allDevs.length === 0) {
+                await sendTelegramMessage(chatId, `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`, []);
+                return res.status(200).send('OK');
+            } else {
+                let listText = `👥 <b>GESTIÓN DE FAMILIARES E INVITADOS</b>\n\n` +
+                               `Selecciona el monitor al que deseas agregar un familiar para que reciba las alertas de luz:\n\n`;
+                const buttons = [];
+                allDevs.forEach(dev => {
+                    const currentName = dev.alias || dev.deviceId;
+                    const guestsCount = (dev.guestChatIds || []).length;
+                    listText += `• <b>${currentName}</b> (<code>${dev.deviceId}</code>) — ${guestsCount} invitado(s)\n`;
+                    buttons.push([{ text: `➕ Agregar Familiar a ${currentName}`, callback_data: `/pedirinvitado_${dev.deviceId}` }]);
+                    if (guestsCount > 0) {
+                        buttons.push([{ text: `❌ Quitar Invitados de ${currentName}`, callback_data: `/quitarinvitado_${dev.deviceId}` }]);
+                    }
+                });
+                await sendTelegramMessage(chatId, listText, buttons);
+                return res.status(200).send('OK');
+            }
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
             // Buscar dispositivos vinculados como dueño (chatId) o como invitado (guestChatIds)
