@@ -103,11 +103,16 @@ function loadFromDisk() {
     }
 }
 
-// Cargar datos de la nube (Upstash Redis)
+// Cargar datos de la nube (Upstash Redis) al arrancar la lambda
+let isCloudLoaded = false;
 async function loadFromCloud() {
     if (!redis) return;
     try {
-        const cloudAliasesRaw = await redis.get('global_aliases');
+        const [cloudAliasesRaw, cloudStoreRaw] = await Promise.all([
+            redis.get('global_aliases'),
+            redis.get('global_persistent_store')
+        ]);
+
         if (cloudAliasesRaw) {
             const cloudAliases = typeof cloudAliasesRaw === 'string' ? JSON.parse(cloudAliasesRaw) : cloudAliasesRaw;
             if (cloudAliases && typeof cloudAliases === 'object') {
@@ -115,7 +120,6 @@ async function loadFromCloud() {
             }
         }
 
-        const cloudStoreRaw = await redis.get('global_persistent_store');
         if (cloudStoreRaw) {
             const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
             if (cloudStore && typeof cloudStore === 'object') {
@@ -130,6 +134,7 @@ async function loadFromCloud() {
                 global.devices = { ...global.persistentStore };
             }
         }
+        isCloudLoaded = true;
     } catch (e) {
         console.error('[REDIS LOAD ERROR]:', e.message);
     }
@@ -140,7 +145,6 @@ loadFromDisk();
 loadFromCloud().catch(err => console.error('Cloud load error:', err));
 
 function persistDevice(deviceId, data) {
-    loadFromDisk();
     global.persistentStore[deviceId] = {
         ...data,
         updatedAt: Date.now()
@@ -150,7 +154,6 @@ function persistDevice(deviceId, data) {
 }
 
 function getDevice(deviceId) {
-    loadFromDisk();
     return global.persistentStore[deviceId] || global.devices[deviceId] || null;
 }
 
@@ -602,7 +605,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
     try {
         loadFromDisk();
-        await loadFromCloud();
+        if (!isCloudLoaded) {
+            await loadFromCloud();
+        }
         const update = req.body;
         let chatId = null;
         let text = "";
