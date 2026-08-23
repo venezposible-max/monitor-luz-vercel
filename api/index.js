@@ -528,10 +528,13 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
             const targetDev = getDevice(devId) || { deviceId: devId };
             const currentName = targetDev ? (targetDev.alias || devId) : devId;
-            replyMsg = `✏️ <b>Renombrar monitor:</b> <code>${currentName}</code> (<code>${devId}</code>)\n\n` +
-                       `Por favor, escribe el nuevo nombre en este formato:\n\n` +
-                       `<code>/nombre ${devId} Casa Caracas</code>\n\n` +
-                       `<i>(O simplemente escribe <b>/nombre NombreDeseado</b> si es tu única placa).</i>`;
+
+            // Guardar estado de renombrado pendiente para este usuario
+            global.pendingRenameForChat = global.pendingRenameForChat || {};
+            global.pendingRenameForChat[chatId] = devId;
+
+            replyMsg = `✏️ <b>Cambiando nombre a:</b> <code>${currentName}</code> (<code>${devId}</code>)\n\n` +
+                       `👉 <b>Escribe a continuación el nuevo nombre que deseas asignarle</b> (Ejemplo: <i>Casa Maracay</i> o <i>Apartamento</i>):`;
             await sendTelegramMessage(chatId, replyMsg, []);
             return res.status(200).send('OK');
         } else if (text.startsWith('/estado_')) {
@@ -798,6 +801,24 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
             return res.status(200).send('OK');
         } else {
+            // Si el usuario tenía seleccionado un monitor para renombrar:
+            global.pendingRenameForChat = global.pendingRenameForChat || {};
+            const targetDevId = global.pendingRenameForChat[chatId];
+            if (targetDevId && text.trim().length > 0) {
+                delete global.pendingRenameForChat[chatId];
+                const targetDev = getDevice(targetDevId) || { deviceId: targetDevId };
+                const newName = text.trim();
+                targetDev.alias = newName;
+                persistDevice(targetDevId, targetDev);
+
+                const msgOk = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDevId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
+                await sendTelegramMessage(chatId, msgOk, [
+                    [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${targetDevId}` }],
+                    [{ text: "🏠 Ver Mis Monitores", callback_data: "/casas" }]
+                ]);
+                return res.status(200).send('OK');
+            }
+
             if (replyMsg) {
                 await sendTelegramMessage(chatId, replyMsg, [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
