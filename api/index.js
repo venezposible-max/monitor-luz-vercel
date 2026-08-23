@@ -25,22 +25,11 @@ global.persistentStore = global.persistentStore || {
     "ESP-51A1B1": {
         deviceId: "ESP-51A1B1",
         chatId: "330749449",
-        lastSeen: new Date("2026-08-22T20:14:00-04:00").getTime(),
-        blackoutStartTime: new Date("2026-08-22T20:14:00-04:00").getTime(),
-        blackoutNotified: true,
+        lastSeen: Date.now(),
+        blackoutStartTime: null,
+        blackoutNotified: false,
         unlinked: false,
-        history: [
-            {
-                id: "event_1787444040000",
-                start: new Date("2026-08-22T20:14:00-04:00").getTime(),
-                startTimeStr: "08:14:00 p. m.",
-                startDateStr: "22/08/2026",
-                end: null,
-                endTimeStr: null,
-                durationStr: "En curso...",
-                durationMs: 0
-            }
-        ]
+        history: []
     }
 };
 
