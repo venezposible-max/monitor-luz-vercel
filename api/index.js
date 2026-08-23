@@ -151,6 +151,8 @@ function setupTelegramCommands() {
         const commandsPayload = JSON.stringify({
             commands: [
                 { command: "estado", description: "Ver si hay luz en tiempo real" },
+                { command: "casas", description: "Ver y seleccionar mis monitores" },
+                { command: "nombre", description: "Asignar nombre a mi monitor" },
                 { command: "reporte", description: "Ver reporte semanal de estabilidad" },
                 { command: "historial", description: "Ver lista y duración de cortes" },
                 { command: "clima", description: "Ver el clima en tu ciudad" },
@@ -575,17 +577,26 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 }
             }
         } else if (text.startsWith('/nombre ') || text.startsWith('/alias ')) {
-            const parts = text.split(' ');
-            const alias = parts.slice(1).join(' ').trim();
+            const parts = text.split(' ').filter(p => p.trim().length > 0);
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             
             if (allDevs.length === 0) {
-                replyMsg = `⚠️ <b>No tienes dispositivos vinculados.</b>`;
-            } else {
-                const targetDev = allDevs[0];
-                targetDev.alias = alias;
+                replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID.</b>`;
+            } else if (parts.length >= 3 && allDevs.some(d => d.deviceId.toUpperCase() === parts[1].toUpperCase())) {
+                // Caso: /nombre ESP-51A1B1 Casa Caracas
+                const targetId = parts[1].toUpperCase();
+                const newName = parts.slice(2).join(' ').trim();
+                const targetDev = allDevs.find(d => d.deviceId.toUpperCase() === targetId);
+                targetDev.alias = newName;
                 persistDevice(targetDev.deviceId, targetDev);
-                replyMsg = `✅ <b>Nombre asignado con éxito:</b> <code>${alias}</code> para la placa <code>${targetDev.deviceId}</code>.`;
+                replyMsg = `✅ <b>Nombre asignado con éxito:</b>\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)`;
+            } else {
+                // Caso: /nombre Casa Caracas (asigna al primer dispositivo o al único)
+                const newName = parts.slice(1).join(' ').trim();
+                const targetDev = allDevs[0];
+                targetDev.alias = newName;
+                persistDevice(targetDev.deviceId, targetDev);
+                replyMsg = `✅ <b>Nombre asignado con éxito:</b>\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)\n\n💡 <i>Si tienes varias placas puedes usar:</i>\n<code>/nombre ${targetDev.deviceId} ${newName}</code>`;
             }
         } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
