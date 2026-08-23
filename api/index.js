@@ -63,8 +63,10 @@ function loadFromDisk() {
         if (fs.existsSync(TMP_FILE)) {
             const raw = fs.readFileSync(TMP_FILE, 'utf8');
             const data = JSON.parse(raw);
-            global.persistentStore = data || {};
-            global.devices = data || {};
+            if (data && Object.keys(data).length > 0) {
+                global.persistentStore = { ...global.persistentStore, ...data };
+                global.devices = { ...global.persistentStore };
+            }
         }
     } catch (e) {
         console.error('Error leyendo /tmp:', e.message);
