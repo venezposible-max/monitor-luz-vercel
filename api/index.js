@@ -957,10 +957,10 @@ app.get('/api/status/:id', async (req, res) => {
         });
     }
 
-    // Comprobar si este dispositivo específico está online (menos de 240s / 4 min desde el último reporte)
+    // Comprobar si este dispositivo específico está online (menos de 300s / 5 min desde el último reporte)
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 240000;
+    const isOnline = elapsedMs < 300000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
