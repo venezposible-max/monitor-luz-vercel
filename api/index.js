@@ -745,7 +745,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 replyMsg = buildWeeklyReport(userDev);
             }
-        } else {
+        } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
             let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
             if (allDevs.length === 0 && combinedDevs.length > 0) {
@@ -757,9 +757,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 const isOnline = (Date.now() - allDevs[0].lastSeen) < 240000;
                 const statusStr = isOnline ? "🟢 HAY LUZ" : "🔴 SIN LUZ";
 
-                const msg = `⚡ <b>Panel de Control CRÉALO PowerWatch</b>\n\n` +
-                            `Hola <b>${senderName}</b>, tu monitor <b>${devName}</b> está activo (${statusStr}).\n\n` +
-                            `Selecciona una opción del menú:`;
+                const msg = `⚡ <b>¡Hola ${senderName}! Bienvenido a Monitor de Luz</b>\n\n` +
+                            `Tu monitor <b>${devName}</b> está activo (${statusStr}).\n\n` +
+                            `¿Qué deseas realizar?`;
                 await sendTelegramMessage(chatId, msg, [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
                     [{ text: "✏️ Asignar o Renombrar Casas", callback_data: "/renombrar" }],
