@@ -552,7 +552,7 @@
             const serverHistory = cacheDeviceData(currentDeviceId, data);
 
             const lastDate = new Date(data.lastSeen);
-            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
             // Renderizar Historial de Cortes oficial
             renderHistory(serverHistory);
