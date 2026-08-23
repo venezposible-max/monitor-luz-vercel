@@ -53,7 +53,13 @@ function loadFromDisk() {
             const raw = fs.readFileSync(TMP_FILE, 'utf8');
             const data = JSON.parse(raw);
             if (data && Object.keys(data).length > 0) {
-                global.persistentStore = { ...global.persistentStore, ...data };
+                Object.keys(data).forEach(id => {
+                    global.persistentStore[id] = {
+                        ...(global.persistentStore[id] || {}),
+                        ...data[id],
+                        alias: data[id].alias || (global.persistentStore[id] ? global.persistentStore[id].alias : id)
+                    };
+                });
                 global.devices = { ...global.persistentStore };
             }
         }
