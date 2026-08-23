@@ -119,6 +119,11 @@ function sendTelegramMessage(chatId, text, customButtons = null) {
                 });
             });
 
+            request.setTimeout(4000, () => {
+                request.destroy();
+                resolve(false);
+            });
+
             request.on('error', (err) => {
                 console.error('[TELEGRAM ERROR]:', err.message);
                 resolve(false);
@@ -482,7 +487,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         global.lastInteractedChatId = chatId;
 
-        await checkBlackoutAlerts();
+        // Ejecutar chequeo de alertas en segundo plano para no bloquear la velocidad de respuesta al usuario
+        checkBlackoutAlerts().catch(e => console.error('Error background checkBlackoutAlerts:', e));
 
         let replyMsg = "";
 
