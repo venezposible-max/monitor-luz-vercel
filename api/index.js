@@ -325,7 +325,9 @@ app.post('/api/ping', async (req, res) => {
     const isReturnFromBlackout = wasBlackout || hasOpenCut;
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
-    const deviceAlias = (req.body.name || req.body.alias || existing.alias || deviceId).toString().trim();
+    // Prioridad estricta de alias: preservar siempre el alias guardado previamente
+    const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
+    const deviceAlias = existing.alias || (incomingAlias && incomingAlias !== deviceId ? incomingAlias : deviceId);
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
         // Obtener el momento real del corte:
