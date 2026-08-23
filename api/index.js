@@ -959,9 +959,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             // Si el usuario tenía seleccionado agregar un invitado:
             global.pendingGuestAddForChat = global.pendingGuestAddForChat || {};
             const guestDevId = global.pendingGuestAddForChat[chatId];
-            if (guestDevId && text.trim().length > 0 && /^\d+$/.test(text.trim())) {
+            const cleanText = (update.message && update.message.text ? update.message.text : text).trim();
+
+            if (guestDevId && cleanText.length > 0 && /^\d+$/.test(cleanText)) {
                 delete global.pendingGuestAddForChat[chatId];
-                const newGuestChatId = text.trim();
+                const newGuestChatId = cleanText;
                 const existingDev = getDevice(guestDevId) || { deviceId: guestDevId };
                 existingDev.guestChatIds = existingDev.guestChatIds || [];
                 if (!existingDev.guestChatIds.includes(newGuestChatId)) {
