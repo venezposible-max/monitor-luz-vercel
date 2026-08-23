@@ -325,23 +325,21 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
+    const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
+    // Prioridad estricta de alias: preservar siempre el alias guardado previamente
+    const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
+    const deviceAlias = existing.alias || (incomingAlias && incomingAlias !== deviceId ? incomingAlias : deviceId);
+
     // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 5 min)
     const hasOpenCut = history.length > 0 && !history[0].end;
     const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 300000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
 
-    // Si la placa reporta su tiempo encendida (uptimeMs), calcular desde el momento de encendido físico real de la placa
-    let computedOnlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
-    // Si la placa ya estaba online sin corte y tenía un onlineSince guardado válido (menor), preservarlo
-    if (!isReturnFromBlackout && existing.onlineSince && existing.onlineSince < computedOnlineSince) {
-        computedOnlineSince = existing.onlineSince;
+    // Determinar la fecha de encendido inicial (onlineSince)
+    let onlineSince = existing.onlineSince || now;
+    if (isReturnFromBlackout || !existing.onlineSince) {
+        onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
     }
-    const onlineSince = computedOnlineSince;
-
-    const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
-    // Prioridad estricta de alias: preservar siempre el alias guardado previamente
-    const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
-    const deviceAlias = existing.alias || (incomingAlias && incomingAlias !== deviceId ? incomingAlias : deviceId);
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
         // Obtener el momento real del corte:
