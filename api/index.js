@@ -742,24 +742,39 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 replyMsg = buildWeeklyReport(userDev);
             }
         } else {
-            // MENSAJE 1: Saludo inicial
-            const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                         `Hola <b>${senderName}</b>, a continuación te envío tu <b>Chat ID</b> en un mensaje separado para que lo copies fácilmente:`;
-            await sendTelegramMessage(chatId, msg1, []);
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            
+            if (allDevs.length > 0) {
+                // Si el usuario YA tiene placa vinculada, no pedirle Chat ID de nuevo
+                const devName = allDevs[0].alias || allDevs[0].deviceId;
+                const isOnline = (Date.now() - allDevs[0].lastSeen) < 240000;
+                const statusStr = isOnline ? "🟢 HAY LUZ" : "🔴 SIN LUZ";
 
-            // MENSAJE 2: ÚNICAMENTE EL NÚMERO (100% puro para copiar en 1 toque sin texto)
-            const msg2 = `<code>${chatId}</code>`;
-            await sendTelegramMessage(chatId, msg2, []);
+                const msg = `⚡ <b>Panel de Control CRÉALO PowerWatch</b>\n\n` +
+                            `Hola <b>${senderName}</b>, tu monitor <b>${devName}</b> está activo (${statusStr}).\n\n` +
+                            `Selecciona una opción del menú:`;
+                await sendTelegramMessage(chatId, msg, [
+                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "✏️ Asignar o Renombrar Casas", callback_data: "/renombrar" }],
+                    [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
+                    [{ text: "📈 Reporte Semanal", callback_data: "/reporte" }],
+                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
+                ]);
+            } else {
+                // Solo si es un usuario 100% NUEVO que no tiene placa, mostrar el Chat ID
+                const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
+                             `Hola <b>${senderName}</b>, a continuación te envío tu <b>Chat ID</b> para vincular tu primera placa:`;
+                await sendTelegramMessage(chatId, msg1, []);
 
-            // MENSAJE 3: Instrucciones y botones de navegación
-            const msg3 = `👆 <i>Copia el número de arriba y pégalo en la casilla de Telegram al configurar tu placa.</i>\n\n` +
-                         `💡 <i>Puedes usar los botones de abajo o escribir <b>/estado</b> para consultar si hay luz.</i>`;
-            await sendTelegramMessage(chatId, msg3, [
-                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/dispositivos" }],
-                [{ text: "📈 Reporte Semanal", callback_data: "/reporte" }],
-                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
-            ]);
+                const msg2 = `<code>${chatId}</code>`;
+                await sendTelegramMessage(chatId, msg2, []);
+
+                const msg3 = `👆 <i>Copia el número de arriba y pégalo en la casilla de Telegram al configurar tu placa.</i>`;
+                await sendTelegramMessage(chatId, msg3, [
+                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
+                ]);
+            }
 
             return res.status(200).send('OK');
         }
