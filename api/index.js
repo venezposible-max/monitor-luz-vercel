@@ -597,6 +597,9 @@ app.post('/api/ping', async (req, res) => {
 
 // 2. ENDPOINT WEBHOOK CON RESPUESTA DIRECTA ULTRA-RÁPIDA (POST /api/telegram-webhook)
 app.post('/api/telegram-webhook', async (req, res) => {
+    // ⚡ RESPUESTA ULTRA-RÁPIDA INSTANTÁNEA A TELEGRAM (Evita reintentos y pegado de chat)
+    res.status(200).send('OK');
+
     try {
         loadFromDisk();
         await loadFromCloud();
@@ -620,9 +623,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             senderName = update.message.from ? (update.message.from.first_name || 'Usuario') : 'Usuario';
         }
 
-        if (!chatId) {
-            return res.status(200).send('OK');
-        }
+        if (!chatId) return;
 
         global.lastInteractedChatId = chatId;
 
