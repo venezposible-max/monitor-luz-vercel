@@ -318,10 +318,13 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 240s, o por corte abierto en historial)
+    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 240s, o por corte abierto en historial)
     const hasOpenCut = history.length > 0 && !history[0].end;
     const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 240000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
+
+    const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
+    const deviceAlias = (req.body.name || req.body.alias || existing.alias || deviceId).toString().trim();
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
         // Obtener el momento real del corte:
@@ -354,6 +357,11 @@ app.post('/api/ping', async (req, res) => {
         const returnTimeStr = returnDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
         const returnDateStr = returnDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
 
+        // DISCRIMINACIÓN: ¿Fue corte eléctrico, caída de internet, o fluctuación?
+        // Si el uptime de la placa es mayor a la duración del corte o tiene pings guardados -> La luz nunca se fue, solo cayó el internet
+        const isOnlyInternetDrop = (boardUptimeMs > durationMs) || (offlinePings > 5);
+        const eventType = (totalMins < 5) ? 'fluctuation' : (isOnlyInternetDrop ? 'internet_drop' : 'power_outage');
+
         // Actualizar el último corte en el historial
         if (history.length > 0 && !history[0].end) {
             history[0].end = now;
@@ -361,6 +369,7 @@ app.post('/api/ping', async (req, res) => {
             history[0].endDateStr = returnDateStr;
             history[0].durationStr = durationFormatted;
             history[0].durationMs = durationMs;
+            history[0].type = eventType;
         } else {
             const startDate = new Date(blackoutStart);
             history.unshift({
@@ -372,7 +381,8 @@ app.post('/api/ping', async (req, res) => {
                 endTimeStr: returnTimeStr,
                 endDateStr: returnDateStr,
                 durationStr: durationFormatted,
-                durationMs: durationMs
+                durationMs: durationMs,
+                type: eventType
             });
         }
 
@@ -380,15 +390,25 @@ app.post('/api/ping', async (req, res) => {
         if (history.length > 50) history = history.slice(0, 50);
 
         let returnMsg = "";
-        if (totalMins < 5) {
+        if (eventType === 'fluctuation') {
             returnMsg = `⚡ <b>¡ENERGÍA / RED NORMALIZADA!</b>\n\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
                         `⏰ <b>Hora de restablecimiento:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
-                        `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón/fluctuación de voltaje) o una micro-caída momentánea de la red de internet en tu casa.</i>\n\n` +
+                        `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o una micro-caída de internet en tu casa.</i>\n\n` +
+                        `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+        } else if (eventType === 'internet_drop') {
+            returnMsg = `🌐 <b>¡SERVICIO DE INTERNET RESTABLECIDO!</b>\n\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
+                        `⏰ <b>Hora de reconexión:</b> ${returnTimeStr} (${returnDateStr})\n` +
+                        `⏱️ <b>Tiempo sin conexión:</b> ${durationFormatted}\n\n` +
+                        `💡 <i>Confirmado: **En tu casa SÍ hubo luz todo el tiempo**. La falla fue exclusivamente de tu **proveedor de internet (CANTV/Fibra)**.</i>\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
         } else {
             returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
                         `⏰ <b>Hora de regreso:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
                         `La energía eléctrica ha regresado a tu casa.\n\n` +
@@ -404,6 +424,7 @@ app.post('/api/ping', async (req, res) => {
 
     const devData = {
         deviceId: deviceId,
+        alias: deviceAlias,
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: targetChatId,
@@ -553,6 +574,37 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
+        } else if (text.startsWith('/nombre ') || text.startsWith('/alias ')) {
+            const parts = text.split(' ');
+            const alias = parts.slice(1).join(' ').trim();
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            
+            if (allDevs.length === 0) {
+                replyMsg = `⚠️ <b>No tienes dispositivos vinculados.</b>`;
+            } else {
+                const targetDev = allDevs[0];
+                targetDev.alias = alias;
+                persistDevice(targetDev.deviceId, targetDev);
+                replyMsg = `✅ <b>Nombre asignado con éxito:</b> <code>${alias}</code> para la placa <code>${targetDev.deviceId}</code>.`;
+            }
+        } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas')) {
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            if (allDevs.length === 0) {
+                replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
+            } else {
+                let listText = `🏠 <b>TUS MONITORES VINCULADOS (${allDevs.length}):</b>\n\n`;
+                const buttons = [];
+                allDevs.forEach((dev, idx) => {
+                    const isOnline = (Date.now() - dev.lastSeen) < 240000;
+                    const statusIcon = isOnline ? "🟢 HAY LUZ" : "🔴 SIN LUZ";
+                    const name = dev.alias || dev.deviceId;
+                    listText += `• <b>${name}</b> (<code>${dev.deviceId}</code>): ${statusIcon}\n`;
+                    buttons.push([{ text: `📍 Ver ${name}`, callback_data: `/estado_${dev.deviceId}` }]);
+                });
+                listText += `\n💡 <i>Puedes renombrar tu equipo escribiendo:</i>\n<code>/nombre Casa Caracas</code>`;
+                await sendTelegramMessage(chatId, listText, buttons);
+                return res.status(200).send('OK');
+            }
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes') || text.includes('registro')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
             const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
@@ -571,16 +623,28 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     const maxShow = Math.min(history.length, 5);
                     for (let i = 0; i < maxShow; i++) {
                         const h = history[i];
-                        const icon = h.end ? "⚡" : "🔴";
-                        historyListText += `${icon} <b>Corte #${history.length - i}:</b>\n` +
-                                           `   • <b>Ida:</b> ${h.startTimeStr} (${h.startDateStr})\n` +
-                                           `   • <b>Regreso:</b> ${h.endTimeStr ? `${h.endTimeStr} (${h.endDateStr})` : '<i>En curso...</i>'}\n` +
+                        let icon = "⚡";
+                        let tagLabel = "Corte Eléctrico";
+                        if (!h.end) {
+                            icon = "🔴";
+                            tagLabel = "En Curso";
+                        } else if (h.type === 'internet_drop') {
+                            icon = "🌐";
+                            tagLabel = "Caída de Internet";
+                        } else if (h.type === 'fluctuation') {
+                            icon = "〽️";
+                            tagLabel = "Fluctuación / Bajón";
+                        }
+
+                        historyListText += `${icon} <b>${tagLabel} #${history.length - i}:</b>\n` +
+                                           `   • <b>Inicio:</b> ${h.startTimeStr} (${h.startDateStr})\n` +
+                                           `   • <b>Fin:</b> ${h.endTimeStr ? `${h.endTimeStr} (${h.endDateStr})` : '<i>En curso...</i>'}\n` +
                                            `   • <b>Duración:</b> <code>${h.durationStr}</code>\n\n`;
                     }
 
-                    replyMsg = `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
-                               `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
-                               `📊 <b>Total de cortes registrados:</b> ${history.length}\n\n` +
+                    replyMsg = `📜 <b>HISTORIAL DE EVENTOS</b>\n\n` +
+                               `📍 <b>Ubicación:</b> <code>${userDev.alias || userDev.deviceId}</code>\n` +
+                               `📊 <b>Total de eventos registrados:</b> ${history.length}\n\n` +
                                historyListText +
                                `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
@@ -609,9 +673,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                          `💡 <i>Puedes usar los botones de abajo o escribir <b>/estado</b> para consultar si hay luz.</i>`;
             await sendTelegramMessage(chatId, msg3, [
                 [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                [{ text: "📈 Reporte Semanal de Estabilidad", callback_data: "/reporte" }],
-                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/dispositivos" }],
+                [{ text: "📈 Reporte Semanal", callback_data: "/reporte" }],
+                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
             ]);
 
             return res.status(200).send('OK');
