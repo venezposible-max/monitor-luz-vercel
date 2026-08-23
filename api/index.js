@@ -516,7 +516,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
             }
-        if (text.startsWith('/nombre') || text.startsWith('nombre') || text.startsWith('/renombrar')) {
+        } else if (text.startsWith('/nombre') || text.startsWith('nombre') || text.startsWith('/renombrar')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             const parts = text.split(' ').filter(p => p.trim().length > 0);
 
@@ -683,6 +683,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
+            await sendTelegramMessage(chatId, replyMsg, [
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
+                [{ text: "📜 Ver Historial", callback_data: "/historial" }]
+            ]);
+            return res.status(200).send('OK');
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes') || text.includes('registro')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
             const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
