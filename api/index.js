@@ -21,7 +21,28 @@ app.get('/estado', (req, res) => {
 
 // Memoria compartida en Vercel
 global.devices = global.devices || {};
-global.persistentStore = global.persistentStore || {};
+global.persistentStore = global.persistentStore || {
+    "ESP-51A1B1": {
+        deviceId: "ESP-51A1B1",
+        chatId: "330749449",
+        lastSeen: new Date("2026-08-22T20:14:00-04:00").getTime(),
+        blackoutStartTime: new Date("2026-08-22T20:14:00-04:00").getTime(),
+        blackoutNotified: true,
+        unlinked: false,
+        history: [
+            {
+                id: "event_1787444040000",
+                start: new Date("2026-08-22T20:14:00-04:00").getTime(),
+                startTimeStr: "08:14:00 p. m.",
+                startDateStr: "22/08/2026",
+                end: null,
+                endTimeStr: null,
+                durationStr: "En curso...",
+                durationMs: 0
+            }
+        ]
+    }
+};
 
 const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 const TMP_FILE = '/tmp/monitor-luz-devices.json';
