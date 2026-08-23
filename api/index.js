@@ -314,7 +314,6 @@ app.post('/api/ping', async (req, res) => {
     }
 
     const now = Date.now();
-    const onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
 
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
@@ -330,6 +329,14 @@ app.post('/api/ping', async (req, res) => {
     const hasOpenCut = history.length > 0 && !history[0].end;
     const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 300000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
+
+    // Si la placa reporta su tiempo encendida (uptimeMs), calcular desde el momento de encendido físico real de la placa
+    let computedOnlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
+    // Si la placa ya estaba online sin corte y tenía un onlineSince guardado válido (menor), preservarlo
+    if (!isReturnFromBlackout && existing.onlineSince && existing.onlineSince < computedOnlineSince) {
+        computedOnlineSince = existing.onlineSince;
+    }
+    const onlineSince = computedOnlineSince;
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
     // Prioridad estricta de alias: preservar siempre el alias guardado previamente
