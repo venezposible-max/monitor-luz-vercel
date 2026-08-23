@@ -327,9 +327,9 @@ app.post('/api/ping', async (req, res) => {
         deviceAlias = (incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId;
     }
 
-    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 5 min)
+    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 90s)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 300000) : false;
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 90000) : false;
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
 
     // Determinar la fecha de encendido inicial (onlineSince)
