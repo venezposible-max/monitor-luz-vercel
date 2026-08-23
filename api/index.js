@@ -21,10 +21,10 @@ app.get('/estado', (req, res) => {
 
 const { Redis } = require('@upstash/redis');
 
-// Inicializar cliente de Redis (Upstash) si las variables de entorno están presentes
+// Inicializar cliente de Redis (Upstash) con fallback seguro
 let redis = null;
-const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || 'https://composed-heron-94035.upstash.io';
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || 'gQAAAAAAAW9TAAIgcDJjOWY1YjBiMDg1NDE0NTU5OGM2MTJhMjllZjc4MGY0Yw';
 
 if (redisUrl && redisToken) {
     try {
@@ -62,6 +62,21 @@ function saveToDisk() {
             redis.set('global_persistent_store', JSON.stringify(global.persistentStore)).catch(err => console.error('[REDIS STORE SAVE ERROR]:', err.message));
         } catch (e) {
             console.error('[REDIS SAVE ERROR]:', e.message);
+        }
+    }
+}
+
+// Guardar en la nube de forma asíncrona garantizada (esperando la confirmación de Redis)
+async function saveToCloud() {
+    saveToDisk();
+    if (redis) {
+        try {
+            await Promise.all([
+                redis.set('global_aliases', JSON.stringify(global.aliases)),
+                redis.set('global_persistent_store', JSON.stringify(global.persistentStore))
+            ]);
+        } catch (e) {
+            console.error('[REDIS SYNC ERROR]:', e.message);
         }
     }
 }
@@ -716,6 +731,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             existingDev.guestChatIds = existingDev.guestChatIds || [];
             if (!existingDev.guestChatIds.includes(cleanText)) existingDev.guestChatIds.push(cleanText);
             persistDevice(guestDevId, existingDev);
+            await saveToCloud();
             await sendTelegramMessage(chatId,
                 `✅ <b>¡Familiar agregado!</b>\n\n👥 <b>Chat ID:</b> <code>${cleanText}</code>\n📍 <b>Monitor:</b> <b>${existingDev.alias || guestDevId}</b>\n\nAhora recibirá todas las alertas.`,
                 [[{ text: '👥 Ver Familiares', callback_data: '/invitar' }],
@@ -738,6 +754,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             existingDev.alias = cleanText;
             existingDev.chatId = existingDev.chatId || chatId;
             persistDevice(renameDevId, existingDev);
+            await saveToCloud();
             await sendTelegramMessage(chatId,
                 `✅ <b>¡Nombre asignado!</b>\n\n📍 <b>${cleanText}</b> (<code>${renameDevId}</code>)`,
                 [[{ text: '📊 Ver Estado', callback_data: `/estado_${renameDevId}` }],
@@ -764,6 +781,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             if (dev) {
                 dev.guestChatIds = [];
                 persistDevice(devId, dev);
+                await saveToCloud();
                 await sendTelegramMessage(chatId,
                     `✅ <b>Todos los familiares de <code>${dev.alias || devId}</code> han sido eliminados.</b>`,
                     [[{ text: '🏠 Mis Monitores', callback_data: '/casas' }]]
