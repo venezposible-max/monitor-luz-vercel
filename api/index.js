@@ -320,10 +320,9 @@ app.post('/api/ping', async (req, res) => {
 
     let history = existing.history || [];
 
-    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por bandera wasBlackout, o por tiempo transcurrido > 240s, o por corte abierto en historial)
+    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por bandera wasBlackout o por corte abierto en historial)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 240000) : false;
-    const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded;
+    const isReturnFromBlackout = wasBlackout || hasOpenCut;
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
     const deviceAlias = (req.body.name || req.body.alias || existing.alias || deviceId).toString().trim();
