@@ -778,18 +778,25 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
             return res.status(200).send('OK');
-        }
+        } else {
+            if (replyMsg) {
+                await sendTelegramMessage(chatId, replyMsg, [
+                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                    [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
+                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
+                ]);
+                return res.status(200).send('OK');
+            }
 
-        if (replyMsg) {
-            await sendTelegramMessage(chatId, replyMsg, [
+            // Si escribe cualquier otra cosa no reconocida:
+            const msgUnknown = `💡 <i>Escribe la palabra <b>hola</b> para recibir la bienvenida o conocer tu Chat ID, o utiliza los botones del menú de abajo:</i>`;
+            await sendTelegramMessage(chatId, msgUnknown, [
                 [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
-                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
+                [{ text: "✏️ Asignar o Renombrar Casas", callback_data: "/renombrar" }],
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
             ]);
             return res.status(200).send('OK');
         }
-
-        return res.status(200).send('OK');
     } catch (e) {
         console.error('Error Webhook:', e);
         return res.status(200).send('OK');
