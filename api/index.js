@@ -433,7 +433,7 @@ app.post('/api/ping', async (req, res) => {
 
     const devData = {
         deviceId: deviceId,
-        alias: deviceAlias,
+        alias: existing.alias || deviceAlias,
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: targetChatId,
