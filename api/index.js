@@ -373,7 +373,7 @@ app.post('/api/ping', async (req, res) => {
             eventType = 'internet_drop';
         }
 
-        // Actualizar el último corte en el historial
+        // Actualizar el último corte en el historial o crear la entrada de regreso
         if (history.length > 0 && !history[0].end) {
             history[0].end = now;
             history[0].endTimeStr = returnTimeStr;
@@ -386,7 +386,7 @@ app.post('/api/ping', async (req, res) => {
             history.unshift({
                 id: `event_${blackoutStart}`,
                 start: blackoutStart,
-                startTimeStr: startDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Caracas' }),
+                startTimeStr: startDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' }),
                 startDateStr: startDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' }),
                 end: now,
                 endTimeStr: returnTimeStr,
