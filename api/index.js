@@ -769,8 +769,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
                 ]);
             } else {
-                const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                             `Hola <b>${senderName}</b>, tu Chat ID es <code>${chatId}</code> para vincular tu placa.`;
+                const msg1 = `⚡ <b>¡Hola ${senderName}! Tu Chat ID de Telegram es:</b>\n\n` +
+                             `<code>${chatId}</code>\n\n` +
+                             `<i>Utiliza este número al configurar la conexión WiFi de tu monitor.</i>`;
                 await sendTelegramMessage(chatId, msg1, [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
                     [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
