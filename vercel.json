@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -22,10 +27,6 @@
     }
   ],
   "crons": [
-    {
-      "path": "/api/cron-check-blackout",
-      "schedule": "0 0 * * *"
-    },
     {
       "path": "/api/cron-weekly-report",
       "schedule": "0 4 * * 1"

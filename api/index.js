@@ -1121,4 +1121,35 @@ app.post('/api/sync-history', (req, res) => {
     return res.json({ success: true, history: mergedHistory });
 });
 
+// KEEPALIVE — Cron cada 4 minutos para que Vercel no duerma la función y el bot responda instantáneo
+app.get('/api/keepalive', (req, res) => {
+    return res.json({ ok: true, ts: Date.now() });
+});
+
+// CRON — Chequear cortes de luz cada minuto
+app.get('/api/cron-check-blackout', async (req, res) => {
+    await checkBlackoutAlerts();
+    return res.json({ success: true, ts: Date.now() });
+});
+
+// CRON — Reporte semanal (domingos a medianoche)
+app.get('/api/cron-weekly-report', async (req, res) => {
+    loadFromDisk();
+    const combined = { ...global.persistentStore, ...global.devices };
+    let sentCount = 0;
+    for (const dev of Object.values(combined)) {
+        if (!dev || !dev.deviceId) continue;
+        let devChatId = (dev.chatId || '').toString().trim();
+        if (devChatId === '3307499449') devChatId = '330749449';
+        if (devChatId) {
+            const reportMsg = buildWeeklyReport(dev);
+            if (reportMsg) {
+                await sendTelegramMessage(devChatId, reportMsg);
+                sentCount++;
+            }
+        }
+    }
+    return res.json({ success: true, message: `Reporte semanal enviado a ${sentCount} dispositivos.` });
+});
+
 module.exports = app;
