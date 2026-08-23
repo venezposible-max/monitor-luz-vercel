@@ -22,15 +22,17 @@ app.get('/estado', (req, res) => {
 // Memoria compartida en Vercel
 global.devices = global.devices || {};
 global.persistentStore = global.persistentStore || {};
+global.aliases = global.aliases || {};
 
 const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 const TMP_FILE = '/tmp/monitor-luz-devices.json';
+const ALIAS_FILE = '/tmp/monitor-luz-aliases.json';
 
-// Guardar datos del dispositivo en archivo /tmp para sobrevivir entre invocaciones
-// Guardar datos del dispositivo en archivo /tmp
+// Guardar datos del dispositivo y alias en archivos /tmp
 function saveToDisk() {
     try {
         fs.writeFileSync(TMP_FILE, JSON.stringify(global.persistentStore), 'utf8');
+        fs.writeFileSync(ALIAS_FILE, JSON.stringify(global.aliases), 'utf8');
     } catch (e) {
         console.error('Error guardando en /tmp:', e.message);
     }
@@ -39,18 +41,30 @@ function saveToDisk() {
 // Cargar datos del archivo /tmp al iniciar
 function loadFromDisk() {
     try {
+        if (fs.existsSync(ALIAS_FILE)) {
+            const rawAlias = fs.readFileSync(ALIAS_FILE, 'utf8');
+            const dataAlias = JSON.parse(rawAlias);
+            if (dataAlias) {
+                global.aliases = { ...global.aliases, ...dataAlias };
+            }
+        }
         if (fs.existsSync(TMP_FILE)) {
             const raw = fs.readFileSync(TMP_FILE, 'utf8');
             const data = JSON.parse(raw);
             if (data && Object.keys(data).length > 0) {
                 Object.keys(data).forEach(id => {
-                    const savedAlias = data[id].alias;
+                    const savedAlias = global.aliases[id] || data[id].alias;
                     const memoryAlias = global.persistentStore[id] ? global.persistentStore[id].alias : null;
                     const validAlias = (savedAlias && savedAlias !== id) ? savedAlias : ((memoryAlias && memoryAlias !== id) ? memoryAlias : (savedAlias || memoryAlias || id));
+                    
+                    if (validAlias && validAlias !== id) {
+                        global.aliases[id] = validAlias;
+                    }
+
                     global.persistentStore[id] = {
                         ...(global.persistentStore[id] || {}),
                         ...data[id],
-                        alias: validAlias
+                        alias: global.aliases[id] || validAlias
                     };
                 });
                 global.devices = { ...global.persistentStore };
@@ -321,10 +335,10 @@ app.post('/api/ping', async (req, res) => {
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
     // Prioridad estricta de alias: preservar siempre el alias personalizado guardado previamente
     const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
-    const existingAlias = existing.alias;
-    let deviceAlias = existingAlias;
-    if (!deviceAlias || deviceAlias === deviceId) {
-        deviceAlias = (incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId;
+    const storedAlias = global.aliases[deviceId] || existing.alias;
+    let deviceAlias = (storedAlias && storedAlias !== deviceId) ? storedAlias : ((incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId);
+    if (deviceAlias && deviceAlias !== deviceId) {
+        global.aliases[deviceId] = deviceAlias;
     }
 
     // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 90s)
@@ -817,6 +831,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 delete global.pendingRenameForChat[chatId];
                 const existingDev = getDevice(targetDevId) || { deviceId: targetDevId };
                 const newName = text.trim();
+                global.aliases[targetDevId] = newName;
                 const updatedDev = {
                     ...existingDev,
                     deviceId: targetDevId,
