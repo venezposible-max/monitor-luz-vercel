@@ -766,8 +766,13 @@
     async function requestRemoteReset() {
         if (!currentDeviceId) return;
 
-        const confirmReset = confirm(`¿Estás seguro de que deseas borrar la red WiFi guardada en la placa ${currentDeviceId}?\n\nAl hacerlo, en el próximo reporte (máximo 60 segundos) la placa borrará su memoria y activará la red 'Configurar-Luz' para reconfigurarla.`);
-        if (!confirmReset) return;
+        // Paso 1: Confirmación inicial
+        const step1 = confirm(`¿Está seguro de que desea reiniciar la red WiFi de la placa ${currentDeviceId}?`);
+        if (!step1) return;
+
+        // Paso 2: Alerta crítica de desconfiguración
+        const step2 = confirm(`🚨 ¡ALERTA CRÍTICA DE DESCONFIGURACIÓN!\n\nEsta acción DESCONFIGURARÁ por completo el equipo:\n• La placa borrará la red WiFi actual guardada.\n• Dejará de monitorear y no enviará alertas de luz hasta que la reconfigures.\n• Emitirá su propia red 'Configurar-Luz' para que te conectes y le asignes un nuevo WiFi.\n\n¿Deseas proceder con el reinicio definitivo?`);
+        if (!step2) return;
 
         try {
             const res = await fetch('/api/reset-wifi', {
@@ -780,7 +785,7 @@
             if (res.ok) {
                 alert("✅ Orden de reinicio enviada a la placa.\nEn su próximo reporte (máximo 60 segundos), la placa borrará su memoria WiFi y activará la red 'Configurar-Luz'.");
             } else {
-                alert("⚠️ " + (data.error || "No se pudo enviar la orden. Asegúrate de que la placa haya enviado al menos un reporte a Railway."));
+                alert("⚠️ " + (data.error || "No se pudo enviar la orden."));
             }
         } catch (e) {
             console.error(e);

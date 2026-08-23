@@ -763,6 +763,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             return res.status(200).send('OK');
         }
 
+        // Helper local: buscar dispositivos de un usuario (dueño o invitado)
+        const getMyDevs = () => devs.filter(d =>
+            String(d.chatId).trim() === chatId ||
+            (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId))
+        );
+
         // --- COMANDOS PRINCIPALES ---
         if (text.startsWith('/pedirinvitado_')) {
             const devId = text.replace('/pedirinvitado_', '').toUpperCase().trim();
@@ -806,10 +812,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         } else if (text.includes('/estado') || text.includes('estado')) {
             const now = Date.now();
-            const myDevs = devs.filter(d =>
-                String(d.chatId).trim() === chatId ||
-                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId))
-            );
+            const myDevs = getMyDevs();
             if (myDevs.length === 0) {
                 await sendTelegramMessage(chatId,
                     `⚠️ <b>Dispositivo no vinculado.</b>\n\nTu Chat ID: <code>${chatId}</code>. Ingrésalo al configurar la placa.`, []);
@@ -829,10 +832,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         } else if (text.includes('/casas') || text.includes('/dispositivos') || text.includes('mis casas') || text.includes('monitores')) {
             const now = Date.now();
-            const myDevs = devs.filter(d =>
-                String(d.chatId).trim() === chatId ||
-                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId))
-            );
+            const myDevs = getMyDevs();
             if (myDevs.length === 0) {
                 await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else {
@@ -848,8 +848,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes')) {
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId) ||
-                          devs.sort((a, b) => b.lastSeen - a.lastSeen)[0];
+            const myDevs = getMyDevs();
+            const myDev = myDevs.length > 0 ? myDevs[0] : devs.sort((a, b) => b.lastSeen - a.lastSeen)[0];
             await sendTelegramMessage(chatId,
                 myDev ? buildHistoryMsg(myDev) : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
@@ -857,7 +857,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
             );
 
         } else if (text.includes('/reporte') || text.includes('reporte') || text.includes('semanal')) {
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId);
+            const myDevs = getMyDevs();
+            const myDev = myDevs.length > 0 ? myDevs[0] : null;
             await sendTelegramMessage(chatId,
                 myDev ? (buildWeeklyReport(myDev) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
@@ -866,7 +867,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.includes('/nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
             const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
             if (myDevs.length === 0) {
-                await sendTelegramMessage(chatId, `⚠️ No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
+                await sendTelegramMessage(chatId, `⚠️ No tienes dispositivos como administrador vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else {
                 let txt = `🏷️ <b>¿A cuál monitor le cambias el nombre?</b>\n\n`;
                 const btns = [];
@@ -880,7 +881,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.includes('/invitar') || text.includes('invitar') || text.includes('familiar') || text.includes('invitado')) {
             const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
             if (myDevs.length === 0) {
-                await sendTelegramMessage(chatId, `⚠️ No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
+                await sendTelegramMessage(chatId, `⚠️ Solo el propietario administrador puede agregar o gestionar familiares en el monitor.`, []);
             } else {
                 let txt = `👥 <b>GESTIÓN DE FAMILIARES E INVITADOS</b>\n\n`;
                 const btns = [];
@@ -893,33 +894,77 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, txt, btns);
             }
 
-        } else if (text.includes('/reiniciar')) {
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId);
-            if (myDev) {
+        } else if (text.startsWith('/confirm_reset_step1_')) {
+            // PASO 2 DE CONFIRMACIÓN: ALERTA CRÍTICA DE DESCONFIGURACIÓN
+            const devId = text.replace('/confirm_reset_step1_', '').toUpperCase().trim();
+            const myDev = devs.find(d => String(d.chatId).trim() === chatId && d.deviceId.toUpperCase() === devId);
+            if (!myDev) {
+                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado o monitor no encontrado.</b>`, []);
+            } else {
+                const devName = myDev.alias || myDev.deviceId;
+                await sendTelegramMessage(chatId,
+                    `🚨 <b>¡ALERTA DE DESCONFIGURACIÓN!</b> 🚨\n\n` +
+                    `⚠️ <b>Si continúas con esta acción:</b>\n` +
+                    `• La placa <b>${devName}</b> (<code>${myDev.deviceId}</code>) <b>borrará la clave WiFi actual</b>.\n` +
+                    `• El monitor se desconfigurará y <b>dejará de enviar alertas de luz</b>.\n` +
+                    `• Emitirá su propia red WiFi (<code>Configurar-Luz</code>) para que te conectes desde tu celular y la vuelvas a configurar.\n\n` +
+                    `¿Está totalmente seguro de proceder?`,
+                    [
+                        [{ text: "🔄 Sí, Desconfigurar y Reiniciar", callback_data: `/confirm_reset_final_${myDev.deviceId}` }],
+                        [{ text: "❌ No, Cancelar", callback_data: "/casas" }]
+                    ]
+                );
+            }
+
+        } else if (text.startsWith('/confirm_reset_final_')) {
+            // PASO 3: EJECUCIÓN FINAL DE LA ORDEN DE REINICIO
+            const devId = text.replace('/confirm_reset_final_', '').toUpperCase().trim();
+            const myDev = devs.find(d => String(d.chatId).trim() === chatId && d.deviceId.toUpperCase() === devId);
+            if (!myDev) {
+                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador puede reiniciar la placa.`, []);
+            } else {
                 if (global.persistentStore[myDev.deviceId]) global.persistentStore[myDev.deviceId].resetRequested = true;
                 if (global.devices[myDev.deviceId]) global.devices[myDev.deviceId].resetRequested = true;
-                saveToDisk();
+                await saveToCloud();
                 await sendTelegramMessage(chatId,
-                    `🔄 <b>Orden de reinicio enviada a:</b> <code>${myDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`,
-                    [[{ text: '📊 Ver Estado', callback_data: `/estado_${myDev.deviceId}` }]]
+                    `✅ <b>¡Orden de reinicio enviada a la placa!</b>\n\n` +
+                    `📱 <b>Dispositivo:</b> <code>${myDev.deviceId}</code>\n\n` +
+                    `En su próximo reporte (máximo 60 segundos), la placa borrará su memoria WiFi y activará la red <code>Configurar-Luz</code>.`,
+                    [[{ text: "📊 Ver Estado", callback_data: `/estado_${myDev.deviceId}` }]]
                 );
+            }
+
+        } else if (text.includes('/reiniciar') || text.includes('reiniciar')) {
+            // PASO 1 DE CONFIRMACIÓN: PREGUNTAR SI ESTÁ SEGURO
+            const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
+            if (myDevs.length === 0) {
+                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador propietario puede reiniciar la placa.`, []);
             } else {
-                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador puede reiniciar la placa.`, []);
+                const myDev = myDevs[0];
+                const devName = myDev.alias || myDev.deviceId;
+                await sendTelegramMessage(chatId,
+                    `⚠️ <b>¿Está seguro de que desea reiniciar la placa?</b>\n\n` +
+                    `📍 <b>Monitor:</b> <b>${devName}</b> (<code>${myDev.deviceId}</code>)\n\n` +
+                    `Esta acción iniciará el proceso de reinicio WiFi del equipo.`,
+                    [
+                        [{ text: "⚠️ Sí, deseo continuar", callback_data: `/confirm_reset_step1_${myDev.deviceId}` }],
+                        [{ text: "❌ Cancelar", callback_data: "/casas" }]
+                    ]
+                );
             }
 
         } else if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId);
-            const on = myDev ? (Date.now() - myDev.lastSeen) < 80000 : false;
+            const myDevs = getMyDevs();
+            const myDev = myDevs.length > 0 ? myDevs[0] : null;
+            const now = Date.now();
+            const on = myDev ? ((now - myDev.lastSeen) < 240000) : false;
             await sendTelegramMessage(chatId,
                 `🌤️ <b>CLIMA — Maracay, Aragua</b>\n\n🌡️ <b>Temperatura:</b> 26 °C\n☁️ <b>Cielo:</b> ⛅ Parcialmente Nublado\n💨 <b>Viento:</b> 10 km/h\n\n⚡ <b>Estado Eléctrico:</b> ${on ? 'HAY LUZ 🟢' : 'SIN LUZ 🔴'}`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
             );
 
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
-            const myDevs = devs.filter(d =>
-                String(d.chatId).trim() === chatId ||
-                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId))
-            );
+            const myDevs = getMyDevs();
             if (myDevs.length > 0) {
                 const d = myDevs[0];
                 const on = (Date.now() - d.lastSeen) < 240000;
