@@ -507,22 +507,22 @@
                 return;
             }
 
-            // 2. Si el servidor se reinició o no responde temporalmente (SE FUE LA LUZ / APAGADO)
+            // 2. Si el dispositivo está OFFLINE (SE FUE LA LUZ / APAGADO)
             if (!data.found || data.status === 'offline') {
                 const cached = getCachedDeviceData(currentDeviceId);
                 const lastSeenTimestamp = data.lastSeen || (cached ? cached.lastSeen : null);
-                const serverHistory = data.history || (cached ? cached.history : []);
+                const serverHistory = (data.history && data.history.length > 0) ? data.history : (cached ? (cached.history || []) : []);
 
                 if (lastSeenTimestamp) {
                     const lastDate = new Date(lastSeenTimestamp);
                     const now = Date.now();
-                    const elapsedMs = now - lastSeenTimestamp;
+                    const elapsedMs = Math.max(0, now - lastSeenTimestamp);
                     const diffMins = Math.floor(elapsedMs / 60000);
                     let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
 
                     renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
                     document.getElementById('uptimeText').textContent = "Sin servicio de luz";
-                    document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
                     renderHistory(serverHistory);
                 } else {
                     renderState('offline', 'SE FUE LA LUZ 🔴', 'El dispositivo no está transmitiendo señal de energía.');
