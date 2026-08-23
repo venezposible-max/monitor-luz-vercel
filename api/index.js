@@ -516,25 +516,69 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
             }
-        } else if (text.includes('/estado') || text.includes('estado')) {
-            const now = Date.now();
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
-            
-            let userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim());
-            if (!userDev && allDevs.length > 0) {
-                userDev = allDevs[0];
-                userDev.chatId = chatId;
-                if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].chatId = chatId;
-                if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].chatId = chatId;
-                saveToDisk();
+        if (text.startsWith('/nombre') || text.startsWith('nombre') || text.startsWith('/renombrar')) {
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            const parts = text.split(' ').filter(p => p.trim().length > 0);
+
+            // Si el usuario escribió directamente: /nombre ESP-51A1B1 Casa Caracas o /nombre Casa Caracas
+            if (parts.length >= 2) {
+                let targetDev = null;
+                let newName = "";
+
+                if (parts.length >= 3 && allDevs.some(d => d.deviceId.toUpperCase() === parts[1].toUpperCase())) {
+                    targetDev = allDevs.find(d => d.deviceId.toUpperCase() === parts[1].toUpperCase());
+                    newName = parts.slice(2).join(' ').trim();
+                } else if (allDevs.length > 0) {
+                    targetDev = allDevs[0];
+                    newName = parts.slice(1).join(' ').trim();
+                }
+
+                if (targetDev && newName) {
+                    targetDev.alias = newName;
+                    persistDevice(targetDev.deviceId, targetDev);
+                    replyMsg = `✅ <b>¡Nombre asignado con éxito!</b>\n\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)\n\nAhora todas las alertas e informes saldrán identificados con este nombre.`;
+                    await sendTelegramMessage(chatId, replyMsg, [
+                        [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${targetDev.deviceId}` }],
+                        [{ text: "🏠 Ver Mis Monitores", callback_data: "/casas" }]
+                    ]);
+                    return res.status(200).send('OK');
+                }
             }
 
-            if (!userDev) {
-                replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo en la casilla de Telegram al configurar la red de tu placa.`;
+            // Si el usuario solo tocó el botón "Asignar Nombre": Mostrar botonera de selección interactiva
+            if (allDevs.length === 0) {
+                replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
             } else {
+                let listText = `🏷️ <b>¿A cuál de tus monitores deseas cambiarle el nombre?</b>\n\n`;
+                const buttons = [];
+                allDevs.forEach(dev => {
+                    const currentName = dev.alias || dev.deviceId;
+                    listText += `• <b>${currentName}</b> (<code>${dev.deviceId}</code>)\n`;
+                    buttons.push([{ text: `✏️ Renombrar ${currentName}`, callback_data: `/pedirnombre_${dev.deviceId}` }]);
+                });
+                await sendTelegramMessage(chatId, listText, buttons);
+                return res.status(200).send('OK');
+            }
+        } else if (text.startsWith('/pedirnombre_')) {
+            const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
+            const targetDev = getDevice(devId);
+            const currentName = targetDev ? (targetDev.alias || devId) : devId;
+            replyMsg = `✏️ <b>Renombrar monitor:</b> <code>${currentName}</code> (<code>${devId}</code>)\n\n` +
+                       `Por favor, escribe el nuevo nombre en este formato:\n\n` +
+                       `<code>/nombre ${devId} Casa Caracas</code>\n\n` +
+                       `<i>(O simplemente escribe <b>/nombre NombreDeseado</b> si es tu única placa).</i>`;
+            await sendTelegramMessage(chatId, replyMsg, []);
+            return res.status(200).send('OK');
+        } else if (text.startsWith('/estado_')) {
+            const devId = text.replace('/estado_', '').toUpperCase().trim();
+            const userDev = getDevice(devId);
+            if (!userDev) {
+                replyMsg = `⚠️ <b>Dispositivo no encontrado:</b> <code>${devId}</code>`;
+            } else {
+                const now = Date.now();
                 const elapsedMs = now - userDev.lastSeen;
-                const isOnline = elapsedMs < 80000;
-                const elapsedSecs = Math.floor(elapsedMs / 1000);
+                const isOnline = elapsedMs < 240000;
+                const devName = userDev.alias || userDev.deviceId;
 
                 if (isOnline) {
                     const uptimeMs = now - (userDev.onlineSince || userDev.lastSeen);
@@ -543,9 +587,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 
                     replyMsg = `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
-                               `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
+                               `📍 <b>Ubicación:</b> <code>${devName}</code>\n` +
+                               `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
-                               `📡 <b>Último reporte:</b> Hace ${elapsedSecs} segundos\n\n` +
+                               `📡 <b>Último reporte:</b> Hace ${Math.floor(elapsedMs / 1000)} segundos\n\n` +
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 } else {
                     const elapsedMins = Math.floor(elapsedMs / 60000);
@@ -553,51 +598,21 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     const lastSeenTime = lastSeenDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
                     const lastSeenDateStr = lastSeenDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
 
-                    let tiempoSinLuz = '';
-                    if (elapsedMins < 60) {
-                        tiempoSinLuz = `${elapsedMins} minuto${elapsedMins === 1 ? '' : 's'}`;
-                    } else {
-                        const horas = Math.floor(elapsedMins / 60);
-                        const mins = elapsedMins % 60;
-                        if (horas < 24) {
-                            tiempoSinLuz = `${horas} hora${horas === 1 ? '' : 's'} y ${mins} min`;
-                        } else {
-                            const dias = Math.floor(horas / 24);
-                            const remHoras = horas % 24;
-                            tiempoSinLuz = `${dias} día${dias === 1 ? '' : 's'}, ${remHoras}h y ${mins}m`;
-                        }
-                    }
+                    let tiempoSinLuz = elapsedMins < 60 ? `${elapsedMins} min` : `${Math.floor(elapsedMins / 60)}h y ${elapsedMins % 60}m`;
 
                     replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
-                               `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n` +
+                               `📍 <b>Ubicación:</b> <code>${devName}</code>\n` +
+                               `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `🕐 <b>Último reporte:</b> ${lastSeenTime} (${lastSeenDateStr})\n` +
-                               `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n` +
-                               `⚠️ <i>La placa se encuentra apagada sin servicio de luz.</i>\n\n` +
+                               `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n\n` +
                                `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
-        } else if (text.startsWith('/nombre ') || text.startsWith('/alias ')) {
-            const parts = text.split(' ').filter(p => p.trim().length > 0);
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
-            
-            if (allDevs.length === 0) {
-                replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID.</b>`;
-            } else if (parts.length >= 3 && allDevs.some(d => d.deviceId.toUpperCase() === parts[1].toUpperCase())) {
-                // Caso: /nombre ESP-51A1B1 Casa Caracas
-                const targetId = parts[1].toUpperCase();
-                const newName = parts.slice(2).join(' ').trim();
-                const targetDev = allDevs.find(d => d.deviceId.toUpperCase() === targetId);
-                targetDev.alias = newName;
-                persistDevice(targetDev.deviceId, targetDev);
-                replyMsg = `✅ <b>Nombre asignado con éxito:</b>\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)`;
-            } else {
-                // Caso: /nombre Casa Caracas (asigna al primer dispositivo o al único)
-                const newName = parts.slice(1).join(' ').trim();
-                const targetDev = allDevs[0];
-                targetDev.alias = newName;
-                persistDevice(targetDev.deviceId, targetDev);
-                replyMsg = `✅ <b>Nombre asignado con éxito:</b>\n📍 <b>${newName}</b> (<code>${targetDev.deviceId}</code>)\n\n💡 <i>Si tienes varias placas puedes usar:</i>\n<code>/nombre ${targetDev.deviceId} ${newName}</code>`;
-            }
+            await sendTelegramMessage(chatId, replyMsg, [
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
+                [{ text: "📜 Ver Historial", callback_data: "/historial" }]
+            ]);
+            return res.status(200).send('OK');
         } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             if (allDevs.length === 0) {
@@ -605,16 +620,68 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 let listText = `🏠 <b>TUS MONITORES VINCULADOS (${allDevs.length}):</b>\n\n`;
                 const buttons = [];
-                allDevs.forEach((dev, idx) => {
+                allDevs.forEach((dev) => {
                     const isOnline = (Date.now() - dev.lastSeen) < 240000;
                     const statusIcon = isOnline ? "🟢 HAY LUZ" : "🔴 SIN LUZ";
                     const name = dev.alias || dev.deviceId;
                     listText += `• <b>${name}</b> (<code>${dev.deviceId}</code>): ${statusIcon}\n`;
-                    buttons.push([{ text: `📍 Ver ${name}`, callback_data: `/estado_${dev.deviceId}` }]);
+                    buttons.push([{ text: `📍 Consultar ${name}`, callback_data: `/estado_${dev.deviceId}` }]);
                 });
-                listText += `\n💡 <i>Puedes renombrar tu equipo escribiendo:</i>\n<code>/nombre Casa Caracas</code>`;
+                buttons.push([{ text: "✏️ Cambiar Nombre a un Monitor", callback_data: "/nombre" }]);
                 await sendTelegramMessage(chatId, listText, buttons);
                 return res.status(200).send('OK');
+            }
+        } else if (text.includes('/estado') || text.includes('estado')) {
+            const now = Date.now();
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+
+            if (allDevs.length === 0) {
+                replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo al configurar tu placa.`;
+            } else if (allDevs.length > 1) {
+                // Si tiene 2 o más placas, abrir menú selector interactivo
+                let listText = `🏠 <b>Tienes ${allDevs.length} monitores vinculados.</b>\n\n¿Cuál de tus casas deseas consultar en vivo?`;
+                const buttons = allDevs.map(dev => {
+                    const isOnline = (now - dev.lastSeen) < 240000;
+                    const icon = isOnline ? "🟢" : "🔴";
+                    const name = dev.alias || dev.deviceId;
+                    return [{ text: `${icon} ${name}`, callback_data: `/estado_${dev.deviceId}` }];
+                });
+                await sendTelegramMessage(chatId, listText, buttons);
+                return res.status(200).send('OK');
+            } else {
+                // Si tiene 1 sola placa, mostrar directo su estado
+                const userDev = allDevs[0];
+                const elapsedMs = now - userDev.lastSeen;
+                const isOnline = elapsedMs < 240000;
+                const devName = userDev.alias || userDev.deviceId;
+
+                if (isOnline) {
+                    const uptimeMs = now - (userDev.onlineSince || userDev.lastSeen);
+                    const hours = Math.floor(uptimeMs / 3600000);
+                    const mins = Math.floor((uptimeMs % 3600000) / 60000);
+                    const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+                    replyMsg = `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
+                               `📍 <b>Ubicación:</b> <code>${devName}</code>\n` +
+                               `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
+                               `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
+                               `📡 <b>Último reporte:</b> Hace ${Math.floor(elapsedMs / 1000)} segundos\n\n` +
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                } else {
+                    const elapsedMins = Math.floor(elapsedMs / 60000);
+                    const lastSeenDate = new Date(userDev.lastSeen);
+                    const lastSeenTime = lastSeenDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+                    const lastSeenDateStr = lastSeenDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
+
+                    let tiempoSinLuz = elapsedMins < 60 ? `${elapsedMins} min` : `${Math.floor(elapsedMins / 60)}h y ${elapsedMins % 60}m`;
+
+                    replyMsg = `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
+                               `📍 <b>Ubicación:</b> <code>${devName}</code>\n` +
+                               `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
+                               `🕐 <b>Último reporte:</b> ${lastSeenTime} (${lastSeenDateStr})\n` +
+                               `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n\n` +
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                }
             }
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes') || text.includes('registro')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
