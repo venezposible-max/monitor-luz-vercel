@@ -219,6 +219,7 @@ function setupTelegramCommands() {
         const commandsPayload = JSON.stringify({
             commands: [
                 { command: "estado", description: "📊 Ver si hay luz en tiempo real" },
+                { command: "invitar", description: "👥 Agregar o gestionar familiares" },
                 { command: "renombrar", description: "✏️ Asignar o Renombrar Casas" },
                 { command: "casas", description: "🏠 Mis Casas / Monitores" },
                 { command: "reporte", description: "📈 Reporte semanal de estabilidad" },
@@ -945,13 +946,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
                 ]);
             } else {
-                const msg1 = `⚡ <b>¡Hola ${senderName}! Tu Chat ID de Telegram es:</b>\n\n` +
-                             `<code>${chatId}</code>\n\n` +
-                             `<i>Utiliza este número al configurar la conexión WiFi de tu monitor.</i>`;
-                await sendTelegramMessage(chatId, msg1, [
-                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                    [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
-                ]);
+                const msg1 = `⚡ <b>¡Hola ${senderName}! Bienvenido a Créalo PowerWatch</b>\n\n` +
+                             `A continuación se muestra tu Chat ID personal de Telegram. Al tocar o presionar sobre el número se copiará automáticamente al portapapeles:`;
+                await sendTelegramMessage(chatId, msg1, []);
+
+                // Enviar el número aislado de 1 solo toque para copiar fácil
+                await sendTelegramMessage(chatId, `<code>${chatId}</code>`, []);
             }
 
             return res.status(200).send('OK');
