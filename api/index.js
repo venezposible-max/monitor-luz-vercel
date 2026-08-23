@@ -779,19 +779,16 @@ app.post('/api/telegram-webhook', async (req, res) => {
             return res.status(200).send('OK');
         }
 
-        return res.status(200).json({
-            method: 'sendMessage',
-            chat_id: chatId,
-            text: replyMsg,
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                    [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                    [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
-                ]
-            }
-        });
+        if (replyMsg) {
+            await sendTelegramMessage(chatId, replyMsg, [
+                [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }],
+                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
+            ]);
+            return res.status(200).send('OK');
+        }
+
+        return res.status(200).send('OK');
     } catch (e) {
         console.error('Error Webhook:', e);
         return res.status(200).send('OK');
