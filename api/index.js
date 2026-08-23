@@ -21,17 +21,7 @@ app.get('/estado', (req, res) => {
 
 // Memoria compartida en Vercel
 global.devices = global.devices || {};
-global.persistentStore = global.persistentStore || {
-    "ESP-51A1B1": {
-        deviceId: "ESP-51A1B1",
-        chatId: "330749449",
-        lastSeen: Date.now(),
-        blackoutStartTime: null,
-        blackoutNotified: false,
-        unlinked: false,
-        history: []
-    }
-};
+global.persistentStore = global.persistentStore || {};
 
 const BOT_TOKEN = "8541967821:AAGaTrOzPG9s_hRn2VnIOyq7-d21_XwJZ38";
 const TMP_FILE = '/tmp/monitor-luz-devices.json';
@@ -336,8 +326,8 @@ app.post('/api/ping', async (req, res) => {
     const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
 
     // Determinar la fecha de encendido inicial (onlineSince)
-    let onlineSince = existing.onlineSince || now;
-    if (isReturnFromBlackout || !existing.onlineSince) {
+    let onlineSince = existing.onlineSince || (boardUptimeMs > 0 ? (now - boardUptimeMs) : now);
+    if (isReturnFromBlackout) {
         onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
     }
 
