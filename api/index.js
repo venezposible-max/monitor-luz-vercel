@@ -746,10 +746,13 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 replyMsg = buildWeeklyReport(userDev);
             }
         } else {
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
+            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
+            if (allDevs.length === 0 && combinedDevs.length > 0) {
+                allDevs = [combinedDevs[0]];
+            }
             
             if (allDevs.length > 0) {
-                // Si el usuario YA tiene placa vinculada, no pedirle Chat ID de nuevo
                 const devName = allDevs[0].alias || allDevs[0].deviceId;
                 const isOnline = (Date.now() - allDevs[0].lastSeen) < 240000;
                 const statusStr = isOnline ? "🟢 HAY LUZ" : "🔴 SIN LUZ";
@@ -765,16 +768,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
                 ]);
             } else {
-                // Solo si es un usuario 100% NUEVO que no tiene placa, mostrar el Chat ID
                 const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
-                             `Hola <b>${senderName}</b>, a continuación te envío tu <b>Chat ID</b> para vincular tu primera placa:`;
-                await sendTelegramMessage(chatId, msg1, []);
-
-                const msg2 = `<code>${chatId}</code>`;
-                await sendTelegramMessage(chatId, msg2, []);
-
-                const msg3 = `👆 <i>Copia el número de arriba y pégalo en la casilla de Telegram al configurar tu placa.</i>`;
-                await sendTelegramMessage(chatId, msg3, [
+                             `Hola <b>${senderName}</b>, tu Chat ID es <code>${chatId}</code> para vincular tu placa.`;
+                await sendTelegramMessage(chatId, msg1, [
                     [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
                     [{ text: "🏠 Mis Casas / Monitores", callback_data: "/casas" }]
                 ]);
