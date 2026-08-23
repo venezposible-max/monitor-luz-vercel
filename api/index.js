@@ -709,8 +709,8 @@ app.get('/api/status/:id', async (req, res) => {
         return res.json({
             found: false,
             deviceId: deviceId,
-            status: 'unlinked',
-            message: 'DISPOSITIVO DESVINCULADO',
+            status: 'offline',
+            message: 'SE FUE LA LUZ',
             history: []
         });
     }
