@@ -122,11 +122,13 @@ function sendTelegramMessage(chatId, text, customButtons = null) {
 }
 
 // Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
+// Configurar el Menú Oficial de Comandos de Telegram (Botón Menú en la esquina)
 function setupTelegramCommands() {
     try {
         const commandsPayload = JSON.stringify({
             commands: [
                 { command: "estado", description: "Ver si hay luz en tiempo real" },
+                { command: "reporte", description: "Ver reporte semanal de estabilidad" },
                 { command: "historial", description: "Ver lista y duración de cortes" },
                 { command: "clima", description: "Ver el clima en tu ciudad" },
                 { command: "reiniciar", description: "Reiniciar WiFi de la placa" }
@@ -149,6 +151,65 @@ function setupTelegramCommands() {
     } catch(e) {}
 }
 setupTelegramCommands();
+
+// Función inteligente para generar el Reporte Semanal de Estabilidad Eléctrica
+function buildWeeklyReport(device) {
+    if (!device) return null;
+    const now = Date.now();
+    const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
+    const history = device.history || [];
+
+    // Filtrar eventos ocurridos en los últimos 7 días
+    const weekEvents = history.filter(h => (h.start && h.start >= oneWeekAgo) || (h.end && h.end >= oneWeekAgo));
+
+    let totalBlackoutMs = 0;
+    let longCutsCount = 0;
+    let microCutsCount = 0;
+    let longestCutMs = 0;
+    let longestCutStr = "Ninguno";
+
+    weekEvents.forEach(evt => {
+        const dur = evt.durationMs || (evt.end && evt.start ? (evt.end - evt.start) : 0);
+        totalBlackoutMs += dur;
+        if (dur >= 300000) { // Mayor a 5 minutos
+            longCutsCount++;
+            if (dur > longestCutMs) {
+                longestCutMs = dur;
+                longestCutStr = `${evt.durationStr} (${evt.startDateStr || ''})`;
+            }
+        } else if (dur > 0) {
+            microCutsCount++;
+        }
+    });
+
+    const totalWeekMs = 7 * 24 * 60 * 60 * 1000;
+    const blackoutHours = (totalBlackoutMs / (1000 * 60 * 60)).toFixed(1);
+    const lightHours = Math.max(0, (168 - (totalBlackoutMs / (1000 * 60 * 60)))).toFixed(1);
+    const stabilityPct = Math.max(0, Math.min(100, ((1 - (totalBlackoutMs / totalWeekMs)) * 100))).toFixed(1);
+
+    let diagnostic = "✨ <b>Excelente:</b> Suministro eléctrico continuo y muy estable.";
+    if (stabilityPct < 80) {
+        diagnostic = "⚠️ <b>Inestable:</b> Se recomienda mantener protectores de voltaje activos.";
+    } else if (stabilityPct < 95) {
+        diagnostic = "👍 <b>Bueno:</b> Estabilidad dentro del promedio aceptable.";
+    }
+
+    const startDate = new Date(oneWeekAgo).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', timeZone: 'America/Caracas' });
+    const endDate = new Date(now).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', timeZone: 'America/Caracas' });
+
+    return `📊 <b>CRÉALO PowerWatch — REPORTE SEMANAL</b> ⚡\n` +
+           `🗓️ <b>Período:</b> ${startDate} al ${endDate}\n` +
+           `📱 <b>Dispositivo:</b> <code>${device.deviceId}</code>\n` +
+           `━━━━━━━━━━━━━━━━━━━━\n\n` +
+           `🟢 <b>Tiempo con Luz:</b> ${lightHours}h (<code>${stabilityPct}%</code>)\n` +
+           `🔴 <b>Tiempo sin Luz:</b> ${blackoutHours}h\n\n` +
+           `📈 <b>Desglose de la Semana:</b>\n` +
+           `• 🔌 <b>Cortes Eléctricos (>5m):</b> ${longCutsCount}\n` +
+           `• ⏱️ <b>Corte más largo:</b> ${longestCutStr}\n` +
+           `• 〽️ <b>Fluctuaciones / Bajones:</b> ${microCutsCount}\n\n` +
+           `💡 <b>Diagnóstico:</b>\n${diagnostic}\n\n` +
+           `🔗 <b>Ver Monitor Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${device.deviceId}`;
+}
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
 async function checkBlackoutAlerts() {
@@ -501,6 +562,15 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
+        } else if (text.includes('/reporte') || text.includes('reporte') || text.includes('/resumen') || text.includes('resumen') || text.includes('semanal')) {
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).sort((a, b) => b.lastSeen - a.lastSeen);
+            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
+
+            if (!userDev) {
+                replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
+            } else {
+                replyMsg = buildWeeklyReport(userDev);
+            }
         } else {
             // MENSAJE 1: Saludo inicial
             const msg1 = `⚡ <b>¡Bienvenido a Monitor de Luz!</b>\n\n` +
@@ -516,6 +586,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                          `💡 <i>Puedes usar los botones de abajo o escribir <b>/estado</b> para consultar si hay luz.</i>`;
             await sendTelegramMessage(chatId, msg3, [
                 [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
+                [{ text: "📈 Reporte Semanal de Estabilidad", callback_data: "/reporte" }],
                 [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
                 [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
             ]);
@@ -595,6 +666,29 @@ app.post('/api/clear-history', (req, res) => {
 app.get('/api/cron-check-blackout', (req, res) => {
     checkBlackoutAlerts();
     return res.json({ success: true, message: 'Chequeo automático de cortes ejecutado.' });
+});
+
+// 5.1 ENDPOINT CRON JOB PARA REPORTE SEMANAL DE LOS DOMINGOS A MEDIANOCHE
+app.get('/api/cron-weekly-report', async (req, res) => {
+    loadFromDisk();
+    const combined = { ...global.persistentStore, ...global.devices };
+    let sentCount = 0;
+
+    for (const dev of Object.values(combined)) {
+        if (!dev || !dev.deviceId) continue;
+        let devChatId = (dev.chatId || '').toString().trim();
+        if (devChatId === '3307499449') devChatId = '330749449';
+
+        if (devChatId) {
+            const reportMsg = buildWeeklyReport(dev);
+            if (reportMsg) {
+                await sendTelegramMessage(devChatId, reportMsg);
+                sentCount++;
+            }
+        }
+    }
+
+    return res.json({ success: true, message: `Reporte semanal enviado a ${sentCount} dispositivos.` });
 });
 
 // 6. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
