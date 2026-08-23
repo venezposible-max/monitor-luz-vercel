@@ -678,14 +678,14 @@ app.post('/api/telegram-webhook', async (req, res) => {
                        `💡 <i>Puedes consultar otra ciudad escribiendo por ejemplo: <b>/clima valencia</b></i>`;
         } else if (text.includes('/reiniciar')) {
             const allDevs = Object.values({ ...global.persistentStore, ...global.devices });
-            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim()) || (allDevs.length > 0 ? allDevs[0] : null);
+            const userDev = allDevs.find(d => String(d.chatId).trim() === String(chatId).trim());
             if (userDev) {
                 if (global.devices[userDev.deviceId]) global.devices[userDev.deviceId].resetRequested = true;
                 if (global.persistentStore[userDev.deviceId]) global.persistentStore[userDev.deviceId].resetRequested = true;
                 saveToDisk();
                 replyMsg = `🔄 <b>Orden de reinicio enviada a:</b> <code>${userDev.deviceId}</code>\n\nLa placa se reiniciará en unos segundos.`;
             } else {
-                replyMsg = `⚠️ <b>No encontré tu dispositivo vinculado.</b>\n\nAsegúrate de ingresar tu Chat ID (<code>${chatId}</code>) al configurar tu equipo.`;
+                replyMsg = `⚠️ <b>Acceso Denegado / No Autorizado.</b>\n\nSolo el administrador propietario del monitor puede solicitar un reinicio WiFi.`;
             }
         } else if (text.startsWith('/pedirnombre_')) {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
