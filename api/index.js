@@ -227,7 +227,7 @@ function buildWeeklyReport(device) {
            `• ⏱️ <b>Corte más largo:</b> ${longestCutStr}\n` +
            `• 〽️ <b>Fluctuaciones / Bajones:</b> ${microCutsCount}\n\n` +
            `💡 <b>Diagnóstico:</b>\n${diagnostic}\n\n` +
-           `🔗 <b>Ver Monitor Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${device.deviceId}`;
+           `🔗 <b>Ver Monitor Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${device.deviceId}`;
 }
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
@@ -243,8 +243,8 @@ async function checkBlackoutAlerts() {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado más de 240 segundos sin señal (4 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
-        if (elapsedMs >= 240000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado 300 segundos sin señal (5 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
+        if (elapsedMs >= 300000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
@@ -288,7 +288,7 @@ async function checkBlackoutAlerts() {
                              `  3️⃣ <b>O ambos eventos simultáneamente</b>\n\n` +
                              `🔍 <i>La causa exacta se determinará y confirmará automáticamente en tu reporte al restablecerse la conexión.</i>\n\n` +
                              `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
-                             `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${dev.deviceId}`;
+                             `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
 
             console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${devChatId} para ${dev.deviceId}`);
             await sendTelegramMessage(devChatId, alertMsg);
@@ -404,7 +404,7 @@ app.post('/api/ping', async (req, res) => {
                         `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
                         `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o una micro-caída de internet en tu casa.</i>\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         } else if (eventType === 'internet_drop') {
             returnMsg = `🌐 <b>¡SERVICIO DE INTERNET RESTABLECIDO!</b>\n\n` +
                         `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
@@ -412,7 +412,7 @@ app.post('/api/ping', async (req, res) => {
                         `⏱️ <b>Tiempo sin conexión:</b> ${durationFormatted}\n\n` +
                         `💡 <i>Confirmado: **En tu casa SÍ hubo luz todo el tiempo**. La falla fue exclusivamente de tu **proveedor de internet (CANTV/Fibra)**.</i>\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         } else {
             returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
                         `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
@@ -420,7 +420,7 @@ app.post('/api/ping', async (req, res) => {
                         `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
                         `La energía eléctrica ha regresado a tu casa.\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${deviceId}`;
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         }
 
         if (targetChatId) {
@@ -554,7 +554,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
                                `📡 <b>Último reporte:</b> Hace ${Math.floor(elapsedMs / 1000)} segundos\n\n` +
-                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 } else {
                     const elapsedMins = Math.floor(elapsedMs / 60000);
                     const lastSeenDate = new Date(userDev.lastSeen);
@@ -568,7 +568,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `🕐 <b>Último reporte:</b> ${lastSeenTime} (${lastSeenDateStr})\n` +
                                `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n\n` +
-                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
             await sendTelegramMessage(chatId, replyMsg, [
@@ -677,7 +677,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
                                `📡 <b>Último reporte:</b> Hace ${Math.floor(elapsedMs / 1000)} segundos\n\n` +
-                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 } else {
                     const elapsedMins = Math.floor(elapsedMs / 60000);
                     const lastSeenDate = new Date(userDev.lastSeen);
@@ -691,7 +691,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `📱 <b>ID:</b> <code>${userDev.deviceId}</code>\n` +
                                `🕐 <b>Último reporte:</b> ${lastSeenTime} (${lastSeenDateStr})\n` +
                                `⏱️ <b>Tiempo sin luz:</b> ${tiempoSinLuz}\n\n` +
-                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
             await sendTelegramMessage(chatId, replyMsg, [
@@ -711,7 +711,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     replyMsg = `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
                                `📱 <b>Dispositivo:</b> <code>${userDev.deviceId}</code>\n\n` +
                                `✨ <i>No hay registros de cortes de luz almacenados. ¡El servicio ha estado estable!</i>\n\n` +
-                               `🔗 <b>Ver en Web:</b> https://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Ver en Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 } else {
                     let historyListText = "";
                     const maxShow = Math.min(history.length, 5);
@@ -740,7 +740,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                                `📍 <b>Ubicación:</b> <code>${userDev.alias || userDev.deviceId}</code>\n` +
                                `📊 <b>Total de eventos registrados:</b> ${history.length}\n\n` +
                                historyListText +
-                               `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel.vercel.app/?id=${userDev.deviceId}`;
+                               `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${userDev.deviceId}`;
                 }
             }
             await sendTelegramMessage(chatId, replyMsg, [
