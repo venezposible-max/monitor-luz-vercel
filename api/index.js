@@ -687,11 +687,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             ]);
             return res.status(200).send('OK');
         } else if (text.includes('/nombre') || text.includes('nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
-            const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
-            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
-            if (allDevs.length === 0 && combinedDevs.length > 0) {
-                allDevs = [combinedDevs[0]];
-            }
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
             const parts = text.split(' ').filter(p => p.trim().length > 0);
 
             // Si el usuario escribió directamente: /nombre ESP-51A1B1 Casa Caracas o /nombre Casa Caracas
@@ -735,7 +731,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 return res.status(200).send('OK');
             }
         } else if (text.includes('/dispositivos') || text.includes('/casas') || text.includes('mis casas') || text.includes('monitores')) {
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => 
+                String(d.chatId).trim() === String(chatId).trim() || 
+                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(String(chatId).trim()))
+            );
             if (allDevs.length === 0) {
                 replyMsg = `⚠️ <b>No tienes dispositivos vinculados a tu Chat ID (<code>${chatId}</code>).</b>`;
             } else {
@@ -754,7 +753,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
         } else if (text.includes('/estado') || text.includes('estado')) {
             const now = Date.now();
-            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => String(d.chatId).trim() === String(chatId).trim());
+            const allDevs = Object.values({ ...global.persistentStore, ...global.devices }).filter(d => 
+                String(d.chatId).trim() === String(chatId).trim() || 
+                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(String(chatId).trim()))
+            );
 
             if (allDevs.length === 0) {
                 replyMsg = `⚠️ <b>Dispositivo no vinculado aún.</b>\n\nTu número de Chat ID es <code>${chatId}</code>.\nAsegúrate de ingresarlo al configurar tu placa.`;
@@ -923,10 +925,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             return res.status(200).send('OK');
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const combinedDevs = Object.values({ ...global.persistentStore, ...global.devices });
-            let allDevs = combinedDevs.filter(d => String(d.chatId).trim() === String(chatId).trim());
-            if (allDevs.length === 0 && combinedDevs.length > 0) {
-                allDevs = [combinedDevs[0]];
-            }
+            // Buscar dispositivos vinculados como dueño (chatId) o como invitado (guestChatIds)
+            let allDevs = combinedDevs.filter(d => 
+                String(d.chatId).trim() === String(chatId).trim() || 
+                (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(String(chatId).trim()))
+            );
             
             if (allDevs.length > 0) {
                 const devName = allDevs[0].alias || allDevs[0].deviceId;
