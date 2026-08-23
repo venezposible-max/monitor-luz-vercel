@@ -150,13 +150,13 @@ function setupTelegramCommands() {
     try {
         const commandsPayload = JSON.stringify({
             commands: [
-                { command: "estado", description: "Ver si hay luz en tiempo real" },
-                { command: "casas", description: "Ver y seleccionar mis monitores" },
-                { command: "nombre", description: "Asignar nombre a mi monitor" },
-                { command: "reporte", description: "Ver reporte semanal de estabilidad" },
-                { command: "historial", description: "Ver lista y duración de cortes" },
-                { command: "clima", description: "Ver el clima en tu ciudad" },
-                { command: "reiniciar", description: "Reiniciar WiFi de la placa" }
+                { command: "estado", description: "📊 Ver si hay luz en tiempo real" },
+                { command: "renombrar", description: "✏️ Asignar o Renombrar Casas" },
+                { command: "casas", description: "🏠 Mis Casas / Monitores" },
+                { command: "reporte", description: "📈 Reporte semanal de estabilidad" },
+                { command: "historial", description: "📜 Ver lista y duración de cortes" },
+                { command: "clima", description: "🌤️ Ver el clima en tu ciudad" },
+                { command: "reiniciar", description: "🔄 Reiniciar WiFi de la placa" }
             ]
         });
 
