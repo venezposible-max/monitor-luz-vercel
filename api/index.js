@@ -950,6 +950,7 @@ app.get('/api/status/:id', async (req, res) => {
     return res.json({
         found: true,
         deviceId: deviceId,
+        alias: device.alias || deviceId,
         lastSeen: device.lastSeen,
         onlineSince: device.onlineSince || device.lastSeen,
         elapsedMs: elapsedMs,

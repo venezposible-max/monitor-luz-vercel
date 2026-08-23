@@ -339,7 +339,11 @@
                 <span class="info-label">Último Reporte</span>
                 <span class="info-value" id="lastReportText">--:--:--</span>
             </div>
-            <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 4px;">
+            <div class="info-item" style="grid-column: span 2; background: rgba(59, 130, 246, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.2); margin-top: 2px;">
+                <span class="info-label" style="color: #60a5fa; font-weight: 700;">📍 Ubicación / Casa</span>
+                <span class="info-value" id="deviceAliasText" style="font-size: 1rem; color: #ffffff;">---</span>
+            </div>
+            <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 2px;">
                 <span class="info-label" style="color: #10b981; font-weight: 700;">⏱️ Tiempo Continuo con Luz</span>
                 <span class="info-value" id="uptimeText" style="font-size: 1.1rem; color: #ffffff;">--</span>
             </div>
@@ -539,6 +543,10 @@
                 renderHistory(serverHistory);
                 return;
             }
+
+            // Actualizar nombre/alias de la ubicación
+            const aliasName = data.alias || currentDeviceId;
+            document.getElementById('deviceAliasText').textContent = aliasName;
 
             // Guardar datos recibidos del servidor
             const serverHistory = cacheDeviceData(currentDeviceId, data);
