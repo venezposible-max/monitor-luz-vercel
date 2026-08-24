@@ -1148,22 +1148,35 @@ app.get('/api/cron-weekly-report', async (req, res) => {
     loadFromDisk();
     const combined = { ...global.persistentStore, ...global.devices };
     let sentCount = 0;
+    const now = Date.now();
 
     for (const dev of Object.values(combined)) {
         if (!dev || !dev.deviceId) continue;
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449';
 
+        // GUARDIA ANTI-DUPLICADOS: Si ya se envió en los últimos 5 días, omitir
+        if (dev.lastWeeklyReportSentAt && (now - dev.lastWeeklyReportSentAt < 5 * 24 * 60 * 60 * 1000)) {
+            console.log(`[WEEKLY-REPORT] Reporte semanal ya enviado recientemente a ${dev.deviceId}. Omitiendo duplicado.`);
+            continue;
+        }
+
         if (devChatId) {
             const reportMsg = buildWeeklyReport(dev);
             if (reportMsg) {
                 await sendTelegramMessage(devChatId, reportMsg);
+                dev.lastWeeklyReportSentAt = now;
+                persistDevice(dev.deviceId, dev);
                 sentCount++;
             }
         }
     }
 
-    return res.json({ success: true, message: `Reporte semanal enviado a ${sentCount} dispositivos.` });
+    if (sentCount > 0) {
+        await saveToCloud();
+    }
+
+    return res.json({ success: true, message: `Reporte semanal procesado. Enviado a ${sentCount} dispositivos.` });
 });
 
 // 6. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
@@ -1268,35 +1281,5 @@ app.post('/api/sync-history', (req, res) => {
     return res.json({ success: true, history: mergedHistory });
 });
 
-// KEEPALIVE — Cron cada 4 minutos para que Vercel no duerma la función y el bot responda instantáneo
-app.get('/api/keepalive', (req, res) => {
-    return res.json({ ok: true, ts: Date.now() });
-});
-
-// CRON — Chequear cortes de luz cada minuto
-app.get('/api/cron-check-blackout', async (req, res) => {
-    await checkBlackoutAlerts();
-    return res.json({ success: true, ts: Date.now() });
-});
-
-// CRON — Reporte semanal (domingos a medianoche)
-app.get('/api/cron-weekly-report', async (req, res) => {
-    loadFromDisk();
-    const combined = { ...global.persistentStore, ...global.devices };
-    let sentCount = 0;
-    for (const dev of Object.values(combined)) {
-        if (!dev || !dev.deviceId) continue;
-        let devChatId = (dev.chatId || '').toString().trim();
-        if (devChatId === '3307499449') devChatId = '330749449';
-        if (devChatId) {
-            const reportMsg = buildWeeklyReport(dev);
-            if (reportMsg) {
-                await sendTelegramMessage(devChatId, reportMsg);
-                sentCount++;
-            }
-        }
-    }
-    return res.json({ success: true, message: `Reporte semanal enviado a ${sentCount} dispositivos.` });
-});
-
 module.exports = app;
+
