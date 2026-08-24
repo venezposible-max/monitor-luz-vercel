@@ -781,17 +781,95 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 []
             );
 
-        } else if (text.startsWith('/quitarinvitado_')) {
-            const devId = text.replace('/quitarinvitado_', '').toUpperCase().trim();
+        } else if (text.startsWith('/delguest_')) {
+            // ELIMINAR UN FAMILIAR ESPECÍFICO (UNO POR UNO)
+            const parts = text.replace('/delguest_', '').split('_');
+            const devId = (parts[0] || '').toUpperCase().trim();
+            const targetGuestId = (parts[1] || '').trim();
+            const dev = getDevice(devId);
+
+            if (dev && targetGuestId) {
+                dev.guestChatIds = (dev.guestChatIds || []).filter(g => String(g).trim() !== targetGuestId);
+                persistDevice(devId, dev);
+                await saveToCloud();
+
+                await sendTelegramMessage(chatId,
+                    `✅ <b>Familiar eliminado con éxito:</b>\n\n` +
+                    `👥 <b>Chat ID:</b> <code>${targetGuestId}</code>\n` +
+                    `📍 <b>Monitor:</b> <b>${dev.alias || devId}</b>\n\n` +
+                    `Este familiar ya no recibirá alertas de luz ni tendrá acceso al monitor.`,
+                    [
+                        [{ text: '👥 Gestión de Familiares', callback_data: '/invitar' }],
+                        [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                    ]
+                );
+
+                // Notificar al familiar que fue desvinculado
+                sendTelegramMessage(targetGuestId,
+                    `ℹ️ <b>Notificación:</b> Has sido removido como familiar del monitor <b>${dev.alias || devId}</b>.`,
+                    []
+                ).catch(() => {});
+            }
+
+        } else if (text.startsWith('/delallguests_')) {
+            // ELIMINAR TODOS LOS FAMILIARES DE UN MONITOR
+            const devId = text.replace('/delallguests_', '').toUpperCase().trim();
             const dev = getDevice(devId);
             if (dev) {
+                const prevGuests = [...(dev.guestChatIds || [])];
                 dev.guestChatIds = [];
                 persistDevice(devId, dev);
                 await saveToCloud();
+
                 await sendTelegramMessage(chatId,
-                    `✅ <b>Todos los familiares de <code>${dev.alias || devId}</code> han sido eliminados.</b>`,
-                    [[{ text: '🏠 Mis Monitores', callback_data: '/casas' }]]
+                    `✅ <b>Todos los familiares de <code>${dev.alias || devId}</code> han sido eliminados.</b>\n\n` +
+                    `Se eliminaron ${prevGuests.length} familiar(es) registrado(s).`,
+                    [
+                        [{ text: '👥 Gestión de Familiares', callback_data: '/invitar' }],
+                        [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                    ]
                 );
+
+                // Notificar a todos los familiares desvinculados
+                for (const gId of prevGuests) {
+                    if (gId) {
+                        sendTelegramMessage(gId,
+                            `ℹ️ <b>Notificación:</b> Has sido removido como familiar del monitor <b>${dev.alias || devId}</b>.`,
+                            []
+                        ).catch(() => {});
+                    }
+                }
+            }
+
+        } else if (text.startsWith('/quitarinvitado_')) {
+            // MENÚ INTERACTIVO: PERMITE ELEGIR CUÁL FAMILIAR QUITAR (O TODOS)
+            const devId = text.replace('/quitarinvitado_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
+
+            if (!dev || (dev.guestChatIds || []).length === 0) {
+                await sendTelegramMessage(chatId,
+                    `ℹ️ <b>No hay familiares registrados en <code>${dev ? (dev.alias || devId) : devId}</code>.</b>`,
+                    [[{ text: '👥 Gestión de Familiares', callback_data: '/invitar' }]]
+                );
+            } else {
+                const guests = dev.guestChatIds;
+                const devName = dev.alias || devId;
+
+                let listMsg = `👥 <b>GESTIÓN DE FAMILIARES — ${devName}</b>\n\n` +
+                              `Selecciona el familiar que deseas eliminar de este monitor:\n\n`;
+
+                const buttons = [];
+                guests.forEach((gId, index) => {
+                    listMsg += `• <b>Familiar ${index + 1}:</b> Chat ID <code>${gId}</code>\n`;
+                    buttons.push([{ text: `❌ Quitar Familiar ${index + 1} (${gId})`, callback_data: `/delguest_${dev.deviceId}_${gId}` }]);
+                });
+
+                if (guests.length > 1) {
+                    buttons.push([{ text: `🗑️ Quitar TODOS los Familiares (${guests.length})`, callback_data: `/delallguests_${dev.deviceId}` }]);
+                }
+                buttons.push([{ text: `🔙 Volver`, callback_data: '/invitar' }]);
+
+                await sendTelegramMessage(chatId, listMsg, buttons);
             }
 
         } else if (text.startsWith('/pedirnombre_')) {
