@@ -11,6 +11,10 @@
       "destination": "/api/index.js"
     },
     {
+      "source": "/devices",
+      "destination": "/public/devices.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/public/$1"
     }
