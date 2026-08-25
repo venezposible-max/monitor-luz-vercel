@@ -322,6 +322,10 @@
     </div>
 
     <div id="statusCard" class="status-card state-loading">
+        <div id="userRoleBadge" style="display: none; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 700; padding: 4px 12px; border-radius: 99px; margin-bottom: 12px; align-self: center; text-transform: uppercase; letter-spacing: 0.5px;">
+            <span id="userRoleIcon">👤</span> <span id="userRoleText">MODO INVITADO</span>
+        </div>
+
         <div class="indicator-outer">
             <div class="pulse-ring"></div>
             <div class="indicator-inner" id="statusIcon">⏳</div>
@@ -339,7 +343,11 @@
                 <span class="info-label">Último Reporte</span>
                 <span class="info-value" id="lastReportText">--:--:--</span>
             </div>
-            <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 4px;">
+            <div class="info-item" style="grid-column: span 2; background: rgba(59, 130, 246, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.2); margin-top: 2px;">
+                <span class="info-label" style="color: #60a5fa; font-weight: 700;">📍 Ubicación / Casa</span>
+                <span class="info-value" id="deviceAliasText" style="font-size: 1rem; color: #ffffff;">---</span>
+            </div>
+            <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 2px;">
                 <span class="info-label" style="color: #10b981; font-weight: 700;">⏱️ Tiempo Continuo con Luz</span>
                 <span class="info-value" id="uptimeText" style="font-size: 1.1rem; color: #ffffff;">--</span>
             </div>
@@ -404,6 +412,9 @@
 
 <script>
     let currentDeviceId = "";
+    let currentChatId = "";
+    let isOwner = false;
+    let currentUserRole = "guest";
     let countdownTimer = 10;
 
     function getQueryParam(param) {
@@ -411,19 +422,48 @@
         return urlParams.get(param);
     }
 
+    function updateRoleBadge(data) {
+        const badgeEl = document.getElementById('userRoleBadge');
+        const iconEl = document.getElementById('userRoleIcon');
+        const textEl = document.getElementById('userRoleText');
+        if (!badgeEl || !iconEl || !textEl) return;
+
+        if (data.isOwner) {
+            badgeEl.style.display = 'inline-flex';
+            badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+            badgeEl.style.color = '#34d399';
+            badgeEl.style.border = '1px solid rgba(16, 185, 129, 0.35)';
+            iconEl.textContent = '👑';
+            textEl.textContent = 'MODO TITULAR (ADMINISTRADOR)';
+        } else {
+            badgeEl.style.display = 'inline-flex';
+            badgeEl.style.background = 'rgba(56, 189, 248, 0.12)';
+            badgeEl.style.color = '#38bdf8';
+            badgeEl.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+            iconEl.textContent = '👤';
+            textEl.textContent = 'MODO INVITADO (SOLO LECTURA)';
+        }
+    }
+
     async function init() {
         const idFromUrl = getQueryParam('id');
+        const cidFromUrl = getQueryParam('chatId') || getQueryParam('chat_id') || getQueryParam('cid');
+
+        if (cidFromUrl && cidFromUrl.trim().length > 0) {
+            currentChatId = cidFromUrl.trim();
+            localStorage.setItem('monitor_chat_id', currentChatId);
+        } else {
+            currentChatId = localStorage.getItem('monitor_chat_id') || '';
+        }
 
         if (idFromUrl && idFromUrl.trim().toUpperCase() !== 'ESP-DEMO12') {
             currentDeviceId = idFromUrl.trim().toUpperCase();
             localStorage.setItem('last_active_device_id', currentDeviceId);
         } else {
-            // Revisar si el usuario ya tenía un dispositivo guardado en su navegador
             const savedId = localStorage.getItem('last_active_device_id');
             if (savedId && savedId.trim().length > 0) {
                 currentDeviceId = savedId.trim().toUpperCase();
             } else {
-                // Consultar al servidor cuál es el dispositivo activo registrado más reciente
                 try {
                     const res = await fetch('/api/devices');
                     const devicesList = await res.json();
@@ -439,9 +479,9 @@
             }
         }
 
-        // Si la URL no tenía el ID, ponérselo limpiamente para guardar en favoritos
         if (!idFromUrl || idFromUrl !== currentDeviceId) {
-            const newUrl = window.location.pathname + '?id=' + currentDeviceId;
+            const cidQuery = currentChatId ? `&chatId=${encodeURIComponent(currentChatId)}` : '';
+            const newUrl = window.location.pathname + '?id=' + currentDeviceId + cidQuery;
             window.history.replaceState({path: newUrl}, '', newUrl);
         }
 
@@ -459,11 +499,9 @@
         }, 1000);
     }
 
-    // Guardar datos del dispositivo en localStorage
     function cacheDeviceData(deviceId, data) {
         try {
             const serverHistory = Array.isArray(data.history) ? data.history : [];
-
             localStorage.setItem(`device_${deviceId}`, JSON.stringify({
                 lastSeen: data.lastSeen,
                 onlineSince: data.onlineSince,
@@ -473,7 +511,6 @@
                 history: serverHistory,
                 cachedAt: Date.now()
             }));
-
             return serverHistory;
         } catch(e) {
             return data.history || [];
@@ -492,10 +529,14 @@
         countdownTimer = 10;
 
         try {
-            const res = await fetch(`/api/status/${currentDeviceId}`);
+            const fetchUrl = `/api/status/${currentDeviceId}${currentChatId ? `?chatId=${encodeURIComponent(currentChatId)}` : ''}`;
+            const res = await fetch(fetchUrl);
             const data = await res.json();
 
-            // 1. Si el dispositivo explícitamente fue desvinculado por orden del usuario
+            isOwner = !!data.isOwner;
+            currentUserRole = data.role || (isOwner ? 'owner' : 'guest');
+            updateRoleBadge(data);
+
             if (data.status === 'unlinked' && data.found && data.unlinked) {
                 try {
                     localStorage.removeItem(`device_${currentDeviceId}`);
@@ -507,10 +548,9 @@
                 return;
             }
 
-            // 2. Si el dispositivo está OFFLINE (SE FUE LA LUZ / APAGADO)
             if (!data.found || data.status === 'offline') {
                 const cached = getCachedDeviceData(currentDeviceId);
-                const defaultCutoff = 1787444040000; // 08:14:00 PM hoy
+                const defaultCutoff = 1787444040000;
                 const lastSeenTimestamp = data.lastSeen || (cached && cached.lastSeen) || defaultCutoff;
                 
                 let serverHistory = (data.history && data.history.length > 0) ? data.history : (cached && cached.history && cached.history.length > 0 ? cached.history : []);
@@ -535,24 +575,23 @@
 
                 renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
                 document.getElementById('uptimeText').textContent = "Sin servicio de luz";
-                document.getElementById('lastReportText').textContent = "08:14:00 p. m.";
+                document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
                 renderHistory(serverHistory);
                 return;
             }
 
-            // Guardar datos recibidos del servidor
+            const aliasName = data.alias || currentDeviceId;
+            document.getElementById('deviceAliasText').textContent = aliasName;
+
             const serverHistory = cacheDeviceData(currentDeviceId, data);
 
             const lastDate = new Date(data.lastSeen);
-            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
-            // Renderizar Historial de Cortes oficial
             renderHistory(serverHistory);
 
-            if (data.elapsedMs < 240000) {
+            if (data.elapsedMs < 300000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
-
-                // Formatear Tiempo Continuo con Luz
                 const uptimeMs = data.uptimeMs || 0;
                 const totalMins = Math.floor(uptimeMs / 60000);
                 
@@ -581,7 +620,6 @@
             }
         } catch (e) {
             console.error(e);
-            // Incluso si hay error de red, intentar mostrar datos guardados
             const cached = getCachedDeviceData(currentDeviceId);
             if (cached && cached.lastSeen) {
                 const lastDate = new Date(cached.lastSeen);
@@ -673,16 +711,16 @@
                         </span>
                         ${statusTag}
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; font-size: 0.76rem; color: var(--text-sub);">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.78rem; margin-top: 4px; color: var(--text-sub);">
                         <div>
-                            <span style="display: block; font-size: 0.68rem; text-transform: uppercase;">${startLabel}</span>
-                            <strong style="color: #f87171;">${item.startTimeStr}</strong>
-                            <span style="display: block; font-size: 0.68rem;">${item.startDateStr || ''}</span>
+                            <span>${startLabel}:</span>
+                            <strong style="color: #fff; display: block;">${item.startTimeStr}</strong>
+                            <small>${item.startDateStr || ''}</small>
                         </div>
                         <div>
-                            <span style="display: block; font-size: 0.68rem; text-transform: uppercase;">${endLabel}</span>
-                            <strong style="color: #34d399;">${item.endTimeStr || '---'}</strong>
-                            <span style="display: block; font-size: 0.68rem;">${item.endDateStr || ''}</span>
+                            <span>${endLabel}:</span>
+                            <strong style="color: ${item.end ? '#fff' : '#ef4444'}; display: block;">${item.endTimeStr || 'En curso...'}</strong>
+                            <small>${item.endDateStr || ''}</small>
                         </div>
                     </div>
                     <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px; margin-top: 2px;">
@@ -702,29 +740,33 @@
     async function clearHistory() {
         if (!currentDeviceId) return;
 
+        // GUARDIA DE SEGURIDAD PARA INVITADOS
+        if (!isOwner) {
+            alert("⛔ ACCESO DENEGADO\n\nUsted es un Familiar Invitado y no está autorizado para borrar el historial de cortes de luz.\n\nSolo el Titular del dispositivo tiene permisos para realizar esta acción.");
+            return;
+        }
+
         const confirmDelete = confirm(`¿Estás seguro de que deseas BORRAR todo el historial de cortes de luz del dispositivo ${currentDeviceId}?\n\nEsta acción no se puede deshacer.`);
         if (!confirmDelete) return;
 
         try {
-            // 1. Limpiar memoria local del navegador inmediatamente
             try {
                 const cached = getCachedDeviceData(currentDeviceId) || {};
                 cached.history = [];
                 localStorage.setItem(`device_${currentDeviceId}`, JSON.stringify(cached));
             } catch(e) {}
 
-            // 2. Limpiar en el servidor backend (y en Telegram)
             const res = await fetch('/api/clear-history', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: currentDeviceId })
+                body: JSON.stringify({ deviceId: currentDeviceId, chatId: currentChatId })
             });
             const data = await res.json();
             if (res.ok) {
                 renderHistory([]);
-                alert("🗑️ " + (data.message || "Historial borrado exitosamente en la web y Telegram."));
+                alert("🗑️ " + (data.message || "Historial borrado exitosamente por el Titular."));
             } else {
-                alert("⚠️ Error: " + (data.error || "No se pudo borrar el historial."));
+                alert(data.error || "No se pudo borrar el historial.");
             }
         } catch (e) {
             console.error(e);
@@ -759,9 +801,9 @@
     function generateQRCode() {
         const qrContainer = document.getElementById("qrcode");
         qrContainer.innerHTML = "";
-        const currentUrl = window.location.origin + window.location.pathname + "?id=" + currentDeviceId;
+        const cidQuery = currentChatId ? `&chatId=${encodeURIComponent(currentChatId)}` : '';
+        const currentUrl = window.location.origin + window.location.pathname + "?id=" + currentDeviceId + cidQuery;
 
-        // Actualizar el campo de texto con el enlace completo
         const urlInput = document.getElementById('fullShareUrlInput');
         if (urlInput) urlInput.value = currentUrl;
 
@@ -780,7 +822,7 @@
         if (!urlInput || !urlInput.value) return;
 
         urlInput.select();
-        urlInput.setSelectionRange(0, 99999); // Para móviles
+        urlInput.setSelectionRange(0, 99999);
 
         navigator.clipboard.writeText(urlInput.value).then(() => {
             const btnText = document.getElementById('copyBtnText');
@@ -797,11 +839,15 @@
     async function requestRemoteReset() {
         if (!currentDeviceId) return;
 
-        // Paso 1: Confirmación inicial
+        // GUARDIA DE SEGURIDAD PARA INVITADOS
+        if (!isOwner) {
+            alert("⛔ ACCESO DENEGADO\n\nUsted es un Familiar Invitado y no está autorizado para desconfigurar o reiniciar la red WiFi de la placa.\n\nSolo el Titular del dispositivo tiene permisos de administración.");
+            return;
+        }
+
         const step1 = confirm(`¿Está seguro de que desea reiniciar la red WiFi de la placa ${currentDeviceId}?`);
         if (!step1) return;
 
-        // Paso 2: Alerta crítica de desconfiguración
         const step2 = confirm(`🚨 ¡ALERTA CRÍTICA DE DESCONFIGURACIÓN!\n\nEsta acción DESCONFIGURARÁ por completo el equipo:\n• La placa borrará la red WiFi actual guardada.\n• Dejará de monitorear y no enviará alertas de luz hasta que la reconfigures.\n• Emitirá su propia red 'Configurar-Luz' para que te conectes y le asignes un nuevo WiFi.\n\n¿Deseas proceder con el reinicio definitivo?`);
         if (!step2) return;
 
@@ -809,14 +855,14 @@
             const res = await fetch('/api/reset-wifi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: currentDeviceId })
+                body: JSON.stringify({ deviceId: currentDeviceId, chatId: currentChatId })
             });
             const data = await res.json();
             
             if (res.ok) {
                 alert("✅ Orden de reinicio enviada a la placa.\nEn su próximo reporte (máximo 60 segundos), la placa borrará su memoria WiFi y activará la red 'Configurar-Luz'.");
             } else {
-                alert("⚠️ " + (data.error || "No se pudo enviar la orden."));
+                alert(data.error || "No se pudo enviar la orden.");
             }
         } catch (e) {
             console.error(e);
@@ -829,7 +875,8 @@
         if (!inputVal) return;
         currentDeviceId = inputVal;
         document.getElementById('deviceIdText').textContent = currentDeviceId;
-        const newUrl = window.location.pathname + '?id=' + currentDeviceId;
+        const cidQuery = currentChatId ? `&chatId=${encodeURIComponent(currentChatId)}` : '';
+        const newUrl = window.location.pathname + '?id=' + currentDeviceId + cidQuery;
         window.history.pushState({path: newUrl}, '', newUrl);
         generateQRCode();
         fetchStatus();

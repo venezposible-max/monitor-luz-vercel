@@ -290,53 +290,57 @@ function setupTelegramCommands() {
 }
 setupTelegramCommands();
 
-// Función inteligente para generar el Reporte Semanal de Estabilidad Eléctrica
-function buildWeeklyReport(device) {
+// Helper: generar URL web con chatId para control de permisos (Titular vs Invitado)
+function getWebUrl(devId, chatId = '') {
+    const cid = (chatId || '').toString().trim();
+    const cidParam = cid ? `&chatId=${encodeURIComponent(cid)}` : '';
+    return `https://monitor-luz-vercel-six.vercel.app/?id=${devId}${cidParam}`;
+}
+
+// 5. HELPER: CONSTRUIR REPORTE SEMANAL
+function buildWeeklyReport(device, targetChatId = '') {
     if (!device) return null;
     const now = Date.now();
-    const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
+    const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
     const history = device.history || [];
 
-    // Filtrar eventos ocurridos en los últimos 7 días
     const weekEvents = history.filter(h => (h.start && h.start >= oneWeekAgo) || (h.end && h.end >= oneWeekAgo));
 
     let totalBlackoutMs = 0;
     let longCutsCount = 0;
     let microCutsCount = 0;
     let longestCutMs = 0;
-    let longestCutStr = "Ninguno";
 
-    weekEvents.forEach(evt => {
-        const dur = evt.durationMs || (evt.end && evt.start ? (evt.end - evt.start) : 0);
+    weekEvents.forEach(e => {
+        const dur = e.durationMs || (e.end ? (e.end - e.start) : 0);
         totalBlackoutMs += dur;
-        if (dur >= 300000) { // Mayor a 5 minutos
+        if (dur >= 300000) {
             longCutsCount++;
-            if (dur > longestCutMs) {
-                longestCutMs = dur;
-                longestCutStr = `${evt.durationStr} (${evt.startDateStr || ''})`;
-            }
         } else if (dur > 0) {
             microCutsCount++;
         }
+        if (dur > longestCutMs) longestCutMs = dur;
     });
 
     const totalWeekMs = 7 * 24 * 60 * 60 * 1000;
-    const blackoutHours = (totalBlackoutMs / (1000 * 60 * 60)).toFixed(1);
-    const lightHours = Math.max(0, (168 - (totalBlackoutMs / (1000 * 60 * 60)))).toFixed(1);
-    const stabilityPct = Math.max(0, Math.min(100, ((1 - (totalBlackoutMs / totalWeekMs)) * 100))).toFixed(1);
+    const blackoutHours = (totalBlackoutMs / 3600000).toFixed(1);
+    const lightHours = ((totalWeekMs - totalBlackoutMs) / 3600000).toFixed(1);
+    const stabilityPct = Math.max(0, Math.min(100, ((totalWeekMs - totalBlackoutMs) / totalWeekMs * 100).toFixed(1)));
 
-    let diagnostic = "✨ <b>Excelente:</b> Suministro eléctrico continuo y muy estable.";
+    let diagnostic = "🌟 <b>Excelente:</b> Suministro eléctrico continuo sin cortes significativos.";
     if (stabilityPct < 80) {
-        diagnostic = "⚠️ <b>Inestable:</b> Se recomienda mantener protectores de voltaje activos.";
+        diagnostic = "🚨 <b>Crítico:</b> Frecuencia severa de cortes eléctricos esta semana.";
     } else if (stabilityPct < 95) {
-        diagnostic = "👍 <b>Bueno:</b> Estabilidad dentro del promedio aceptable.";
+        diagnostic = "⚠️ <b>Inestable:</b> Se registraron varias interrupciones en el servicio.";
     }
 
-    const startDate = new Date(oneWeekAgo).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', timeZone: 'America/Caracas' });
-    const endDate = new Date(now).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', timeZone: 'America/Caracas' });
+    const longestHours = Math.floor(longestCutMs / 3600000);
+    const longestMins = Math.floor((longestCutMs % 3600000) / 60000);
+    const longestCutStr = longestHours > 0 ? `${longestHours}h ${longestMins}m` : `${longestMins}m`;
 
-    return `📊 <b>CRÉALO PowerWatch — REPORTE SEMANAL</b> ⚡\n` +
-           `🗓️ <b>Período:</b> ${startDate} al ${endDate}\n` +
+    return `📊 <b>REPORTE SEMANAL DE ENERGÍA ELÉCTRICA</b>\n` +
+           `📅 <i>Últimos 7 días</i>\n\n` +
+           `📍 <b>Ubicación:</b> <b>${device.alias || device.deviceId}</b>\n` +
            `📱 <b>Dispositivo:</b> <code>${device.deviceId}</code>\n` +
            `━━━━━━━━━━━━━━━━━━━━\n\n` +
            `🟢 <b>Tiempo con Luz:</b> ${lightHours}h (<code>${stabilityPct}%</code>)\n` +
@@ -346,17 +350,20 @@ function buildWeeklyReport(device) {
            `• ⏱️ <b>Corte más largo:</b> ${longestCutStr}\n` +
            `• 〽️ <b>Fluctuaciones / Bajones:</b> ${microCutsCount}\n\n` +
            `💡 <b>Diagnóstico:</b>\n${diagnostic}\n\n` +
-           `🔗 <b>Ver Monitor Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${device.deviceId}`;
+           `🔗 <b>Ver Monitor Web:</b>\n${getWebUrl(device.deviceId, targetChatId || device.chatId)}`;
 }
 
 // Helper: construir mensaje de estado de un dispositivo
-function buildStatusMsg(dev, devId) {
+function buildStatusMsg(dev, devId, targetChatId = '') {
     if (!dev) return `⚠️ <b>Dispositivo no encontrado:</b> <code>${devId || 'ESP-DESCONOCIDO'}</code>`;
     const now = Date.now();
     const lastSeen = dev.lastSeen || now;
     const elapsed = now - lastSeen;
     const online = elapsed < 240000;
     const name = dev.alias || dev.deviceId || devId;
+    const activeDevId = dev.deviceId || devId;
+    const webLink = getWebUrl(activeDevId, targetChatId || dev.chatId);
+
     if (online) {
         const up = now - (dev.onlineSince || lastSeen);
         const h = Math.floor(up / 3600000);
@@ -364,10 +371,10 @@ function buildStatusMsg(dev, devId) {
         const uptimeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
         return `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
                `📍 <b>Ubicación:</b> ${name}\n` +
-               `📱 <b>ID:</b> <code>${dev.deviceId || devId}</code>\n` +
+               `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
                `📡 <b>Último reporte:</b> Hace ${Math.max(0, Math.floor(elapsed / 1000))} segundos\n\n` +
-               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId || devId}`;
+               `🔗 <b>Monitor Web:</b> ${webLink}`;
     } else {
         const mins = Math.floor(elapsed / 60000);
         const t = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h y ${mins % 60}m`;
@@ -376,24 +383,26 @@ function buildStatusMsg(dev, devId) {
         const ds = dt.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
         return `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
                `📍 <b>Ubicación:</b> ${name}\n` +
-               `📱 <b>ID:</b> <code>${dev.deviceId || devId}</code>\n` +
+               `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `🕐 <b>Último reporte:</b> ${ts} (${ds})\n` +
                `⏱️ <b>Tiempo sin luz:</b> ${t}\n\n` +
-               `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId || devId}`;
+               `🔗 <b>Monitor Web:</b> ${webLink}`;
     }
 }
 
 // Helper: construir mensaje de historial
-function buildHistoryMsg(dev) {
+function buildHistoryMsg(dev, targetChatId = '') {
     if (!dev) return '⚠️ <b>Dispositivo no encontrado.</b>';
     const name = dev.alias || dev.deviceId;
     const history = dev.history || [];
+    const webLink = getWebUrl(dev.deviceId, targetChatId || dev.chatId);
+
     if (history.length === 0) {
         return `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
                `📍 <b>Ubicación:</b> <b>${name}</b>\n` +
                `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n\n` +
                `✨ <i>No hay registros de cortes de luz almacenados. ¡El suministro ha estado estable!</i>\n\n` +
-               `🔗 <b>Ver en Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
+               `🔗 <b>Ver en Web:</b> ${webLink}`;
     }
     let historyListText = "";
     const maxShow = Math.min(history.length, 5);
@@ -422,7 +431,7 @@ function buildHistoryMsg(dev) {
            `📍 <b>Ubicación:</b> <b>${name}</b>\n` +
            `📊 <b>Total de eventos registrados:</b> ${history.length}\n\n` +
            historyListText +
-           `🔗 <b>Ver y gestionar en la Web:</b>\nhttps://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
+           `🔗 <b>Ver y gestionar en la Web:</b>\n${webLink}`;
 }
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
@@ -886,7 +895,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         } else if (text.startsWith('/estado_')) {
             const devId = text.replace('/estado_', '').toUpperCase().trim();
-            await sendTelegramMessage(chatId, buildStatusMsg(getDevice(devId), devId), [
+            await sendTelegramMessage(chatId, buildStatusMsg(getDevice(devId), devId, chatId), [
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                 [{ text: '📜 Ver Historial', callback_data: '/historial' }]
             ]);
@@ -905,7 +914,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     })
                 );
             } else {
-                await sendTelegramMessage(chatId, buildStatusMsg(myDevs[0], myDevs[0].deviceId), [
+                await sendTelegramMessage(chatId, buildStatusMsg(myDevs[0], myDevs[0].deviceId, chatId), [
                     [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                     [{ text: '📜 Ver Historial', callback_data: '/historial' }]
                 ]);
@@ -932,7 +941,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const myDevs = getMyDevs();
             const myDev = myDevs.length > 0 ? myDevs[0] : devs.sort((a, b) => b.lastSeen - a.lastSeen)[0];
             await sendTelegramMessage(chatId,
-                myDev ? buildHistoryMsg(myDev) : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
+                myDev ? buildHistoryMsg(myDev, chatId) : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
                  [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]]
             );
@@ -941,7 +950,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const myDevs = getMyDevs();
             const myDev = myDevs.length > 0 ? myDevs[0] : null;
             await sendTelegramMessage(chatId,
-                myDev ? (buildWeeklyReport(myDev) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
+                myDev ? (buildWeeklyReport(myDev, chatId) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
             );
 
@@ -1088,21 +1097,41 @@ app.post('/api/telegram-webhook', async (req, res) => {
 });
 
 
+// Helper: verificar si un chatId es el Titular (Dueño) de un dispositivo
+function checkIsOwner(device, chatId) {
+    if (!device || !chatId) return false;
+    let reqId = String(chatId).trim();
+    let devOwnerId = String(device.chatId || '').trim();
+    if (reqId === '3307499449') reqId = '330749449';
+    if (devOwnerId === '3307499449') devOwnerId = '330749449';
+    return !!(devOwnerId && reqId && devOwnerId === reqId);
+}
+
 // 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
-app.post('/api/reset-wifi', (req, res) => {
+app.post('/api/reset-wifi', async (req, res) => {
     loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const reqChatId = (req.body.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
 
     if (!deviceId || !device) {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
+    // CONTROL DE PERMISOS: Solo el Titular puede reiniciar/desconfigurar la placa
+    const isOwner = checkIsOwner(device, reqChatId);
+    if (!isOwner) {
+        return res.status(403).json({ 
+            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado y no está autorizado para desconfigurar o reiniciar la red WiFi de la placa. Solo el Titular puede realizar esta acción.' 
+        });
+    }
+
     device.resetRequested = true;
     device.unlinked = true;
     persistDevice(deviceId, device);
+    await saveToCloud();
 
-    return res.json({ success: true, message: 'Orden de reinicio registrada.' });
+    return res.json({ success: true, message: 'Orden de reinicio registrada por el Titular.' });
 });
 
 // 3.1 ENDPOINT CUANDO EL DISPOSITIVO SE DESVINCULA (POST /api/device-unlinked)
@@ -1122,19 +1151,29 @@ app.post('/api/device-unlinked', (req, res) => {
 });
 
 // 4. ENDPOINT PARA BORRAR EL HISTORIAL DE UN DISPOSITIVO (POST /api/clear-history)
-app.post('/api/clear-history', (req, res) => {
+app.post('/api/clear-history', async (req, res) => {
     loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const reqChatId = (req.body.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
 
     if (!deviceId || !device) {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
+    // CONTROL DE PERMISOS: Solo el Titular puede borrar el historial
+    const isOwner = checkIsOwner(device, reqChatId);
+    if (!isOwner) {
+        return res.status(403).json({ 
+            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado y no está autorizado para borrar el historial de cortes. Solo el Titular puede realizar esta acción.' 
+        });
+    }
+
     device.history = [];
     persistDevice(deviceId, device);
+    await saveToCloud();
 
-    return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente en la web y Telegram.` });
+    return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente por el Titular.` });
 });
 
 // 5. ENDPOINT CRON JOB DE VERCEL PARA CHEQUEAR CORTES CADA MINUTO AUTOMÁTICAMENTE
@@ -1162,7 +1201,7 @@ app.get('/api/cron-weekly-report', async (req, res) => {
         }
 
         if (devChatId) {
-            const reportMsg = buildWeeklyReport(dev);
+            const reportMsg = buildWeeklyReport(dev, devChatId);
             if (reportMsg) {
                 await sendTelegramMessage(devChatId, reportMsg);
                 dev.lastWeeklyReportSentAt = now;
@@ -1191,6 +1230,7 @@ app.get('/api/devices', (req, res) => {
 app.get('/api/status/:id', async (req, res) => {
     await checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
+    const reqChatId = (req.query.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
 
     if (!device) {
@@ -1199,9 +1239,17 @@ app.get('/api/status/:id', async (req, res) => {
             deviceId: deviceId,
             status: 'offline',
             message: 'SE FUE LA LUZ',
-            history: []
+            history: [],
+            isOwner: false,
+            isGuest: true,
+            role: 'guest',
+            roleLabel: 'Familiar Invitado'
         });
     }
+
+    const isOwner = checkIsOwner(device, reqChatId);
+    const role = isOwner ? 'owner' : 'guest';
+    const roleLabel = isOwner ? 'Titular' : 'Familiar Invitado';
 
     // Si el dispositivo fue reseteado o desvinculado
     if (device.unlinked) {
@@ -1211,7 +1259,11 @@ app.get('/api/status/:id', async (req, res) => {
             lastSeen: device.lastSeen,
             status: 'unlinked',
             message: 'DISPOSITIVO DESVINCULADO',
-            history: device.history || []
+            history: device.history || [],
+            isOwner: isOwner,
+            isGuest: !isOwner,
+            role: role,
+            roleLabel: roleLabel
         });
     }
 
@@ -1236,7 +1288,11 @@ app.get('/api/status/:id', async (req, res) => {
         uptimeMs: uptimeMs,
         status: isOnline ? 'online' : 'offline',
         message: isOnline ? 'HAY LUZ' : 'SE FUE LA LUZ',
-        history: device.history || []
+        history: device.history || [],
+        isOwner: isOwner,
+        isGuest: !isOwner,
+        role: role,
+        roleLabel: roleLabel
     });
 });
 
