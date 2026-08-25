@@ -1065,6 +1065,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     `⚡ <b>¡Hola ${senderName}! Bienvenido a Monitor de Luz</b>\n\n` +
                     `Tu monitor <b>${d.alias || d.deviceId}</b> está ${on ? '🟢 CON LUZ' : '🔴 SIN LUZ'}.\n\n¿Qué deseas hacer?`,
                     [
+                        [{ text: '📍 Ver Ubicaciones (Web App) 📱', web_app: { url: `https://monitor-luz-vercel-six.vercel.app/devices?chatId=${chatId}` } }],
                         [{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
                         [{ text: '✏️ Renombrar Casas', callback_data: '/renombrar' }],
                         [{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }],
@@ -1085,6 +1086,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             await sendTelegramMessage(chatId,
                 `💡 <i>Escribe <b>hola</b> para ver el menú, o usa los botones de abajo:</i>`,
                 [
+                    [{ text: '📍 Ver Ubicaciones (Web App) 📱', web_app: { url: `https://monitor-luz-vercel-six.vercel.app/devices?chatId=${chatId}` } }],
                     [{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
                     [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                     [{ text: '✏️ Renombrar', callback_data: '/renombrar' }]
