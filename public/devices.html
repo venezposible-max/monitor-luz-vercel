@@ -113,7 +113,12 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 </div>
 
 <script>
-var cid = localStorage.getItem('monitor_chat_id') || '';
+var cid = '';
+try {
+  cid = localStorage.getItem('monitor_chat_id') || '';
+} catch (e) {
+  console.warn('localStorage no disponible:', e);
+}
 
 function qp(p){ return new URLSearchParams(location.search).get(p); }
 
@@ -207,8 +212,17 @@ function go(){
 document.getElementById('mid').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
 
 (function init(){
-  var c=qp('chatId')||qp('chat_id')||qp('cid');
-  if(c){cid=c.trim();localStorage.setItem('monitor_chat_id',cid);}
+  try {
+    var c=qp('chatId')||qp('chat_id')||qp('cid');
+    if(c){
+      cid=c.trim();
+      try { localStorage.setItem('monitor_chat_id',cid); } catch(e){}
+    } else {
+      try { cid = localStorage.getItem('monitor_chat_id') || ''; } catch(e){}
+    }
+  } catch(e) {
+    console.error('Error en init variables:', e);
+  }
   load();
   setInterval(load,20000);
 })();
