@@ -1278,7 +1278,10 @@ app.get('/api/devices-list', async (req, res) => {
 // 6. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
 // ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS
 app.get('/api/devices-list', async (req, res) => {
-    if (!isCloudLoaded) await loadFromCloud();
+    // Cargar desde la nube en background sin bloquear la respuesta
+    if (!isCloudLoaded) {
+        loadFromCloud().catch(() => {}); // fire and forget
+    }
     const combined = { ...global.persistentStore, ...global.devices };
     const now = Date.now();
     const OFFLINE_THRESHOLD_MS = 300000; // 5 minutos
