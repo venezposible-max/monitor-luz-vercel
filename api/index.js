@@ -1241,67 +1241,35 @@ app.get('/api/cron-weekly-report', async (req, res) => {
     return res.json({ success: true, message: `Reporte semanal procesado. Enviado a ${sentCount} dispositivos.` });
 });
 
-// ENDPOINT PARA LISTAR TODOS LOS DISPOSITIVOS CON ESTADO ENRIQUECIDO
-app.get('/api/devices-list', async (req, res) => {
-    if (!isCloudLoaded) {
-        await loadFromCloud();
+// ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS (rápido, sin bloqueo)
+app.get('/api/devices-list', (req, res) => {
+    try {
+        // Disparar carga en background si hace falta, sin bloquear
+        if (!isCloudLoaded) {
+            loadFromCloud().catch(() => {});
+        }
+        const combined = { ...global.persistentStore, ...global.devices };
+        const now = Date.now();
+        const OFFLINE_THRESHOLD_MS = 300000;
+
+        const devices = Object.values(combined).map(device => {
+            const deviceId = (device.deviceId || device.id || '').toString().toUpperCase();
+            if (!deviceId) return null;
+            const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
+            const lastSeen = device.lastSeen || 0;
+            const elapsedMs = lastSeen ? Math.max(0, now - lastSeen) : null;
+            const isOnline = lastSeen && elapsedMs !== null && elapsedMs < OFFLINE_THRESHOLD_MS;
+            const statusCode = isOnline ? 'online' : 'offline';
+            const uptimeMs = (isOnline && device.onlineSince) ? Math.max(0, now - device.onlineSince) : 0;
+            return { deviceId, alias, lastSeen, elapsedMs, uptimeMs, statusCode, history: device.history || [] };
+        }).filter(Boolean);
+
+        devices.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+        return res.json({ devices, total: devices.length });
+    } catch (e) {
+        console.error('[devices-list ERROR]', e.message);
+        return res.json({ devices: [], total: 0, error: e.message });
     }
-    await checkBlackoutAlerts();
-    const combined = { ...global.persistentStore, ...global.devices };
-    const now = Date.now();
-    const OFFLINE_THRESHOLD_MS = 300000; // 5 min
-
-    const devices = Object.values(combined).map(device => {
-        const deviceId = device.deviceId || device.id || '';
-        const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
-        const lastSeen = device.lastSeen || 0;
-        const elapsedMs = lastSeen ? Math.max(0, now - lastSeen) : null;
-        const isOnline = lastSeen && elapsedMs < OFFLINE_THRESHOLD_MS;
-        const statusCode = isOnline ? 'online' : 'offline';
-        const uptimeMs = device.onlineSince ? Math.max(0, now - device.onlineSince) : 0;
-
-        return {
-            deviceId,
-            alias,
-            lastSeen,
-            elapsedMs,
-            uptimeMs: isOnline ? uptimeMs : 0,
-            statusCode,
-            history: device.history || []
-        };
-    }).filter(d => d.deviceId);
-
-    devices.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
-    return res.json({ devices, total: devices.length });
-});
-
-// 6. ENDPOINT PARA OBTENER TODOS LOS DISPOSITIVOS (GET /api/devices)
-// ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS
-app.get('/api/devices-list', async (req, res) => {
-    // Cargar desde la nube en background sin bloquear la respuesta
-    if (!isCloudLoaded) {
-        loadFromCloud().catch(() => {}); // fire and forget
-    }
-    const combined = { ...global.persistentStore, ...global.devices };
-    const now = Date.now();
-    const OFFLINE_THRESHOLD_MS = 300000; // 5 minutos
-
-    const devices = Object.values(combined).map(device => {
-        const deviceId = (device.deviceId || device.id || '').toString().toUpperCase();
-        if (!deviceId) return null;
-        const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
-        const lastSeen = device.lastSeen || 0;
-        const elapsedMs = lastSeen ? Math.max(0, now - lastSeen) : null;
-        const isOnline = lastSeen && elapsedMs !== null && elapsedMs < OFFLINE_THRESHOLD_MS;
-        const statusCode = isOnline ? 'online' : 'offline';
-        const uptimeMs = (isOnline && device.onlineSince) ? Math.max(0, now - device.onlineSince) : 0;
-        const history = device.history || [];
-
-        return { deviceId, alias, lastSeen, elapsedMs, uptimeMs, statusCode, history };
-    }).filter(Boolean);
-
-    devices.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
-    return res.json({ devices, total: devices.length });
 });
 
 app.get('/api/devices', (req, res) => {
