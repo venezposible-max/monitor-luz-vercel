@@ -1243,7 +1243,7 @@ app.get('/api/cron-weekly-report', async (req, res) => {
     return res.json({ success: true, message: `Reporte semanal procesado. Enviado a ${sentCount} dispositivos.` });
 });
 
-// ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS (rápido, sin bloqueo)
+// ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS (rápido, sin bloqueo y filtrado por seguridad)
 app.get('/api/devices-list', (req, res) => {
     try {
         // Disparar carga en background si hace falta, sin bloquear
@@ -1253,10 +1253,30 @@ app.get('/api/devices-list', (req, res) => {
         const combined = { ...global.persistentStore, ...global.devices };
         const now = Date.now();
         const OFFLINE_THRESHOLD_MS = 300000;
+        
+        let reqChatId = String(req.query.chatId || '').trim();
+        // Corrección de bug conocido de Telegram ID para Franklin
+        if (reqChatId === '3307499449') reqChatId = '330749449';
 
         const devices = Object.values(combined).map(device => {
             const deviceId = (device.deviceId || device.id || '').toString().toUpperCase();
             if (!deviceId) return null;
+
+            // Lógica de filtrado por chatId
+            if (reqChatId) {
+                let devOwnerId = String(device.chatId || '').trim();
+                if (devOwnerId === '3307499449') devOwnerId = '330749449';
+                const guests = (device.guestChatIds || []).map(g => String(g).trim());
+
+                const isOwner = reqChatId === devOwnerId;
+                const isGuest = guests.includes(reqChatId);
+
+                // Si no es dueño ni invitado, no se le muestra este dispositivo
+                if (!isOwner && !isGuest) {
+                    return null;
+                }
+            }
+
             const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
             const lastSeen = device.lastSeen || 0;
             const elapsedMs = lastSeen ? Math.max(0, now - lastSeen) : null;
