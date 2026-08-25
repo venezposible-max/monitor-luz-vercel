@@ -1279,7 +1279,6 @@ app.get('/api/devices-list', async (req, res) => {
 // ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS
 app.get('/api/devices-list', async (req, res) => {
     if (!isCloudLoaded) await loadFromCloud();
-    await checkBlackoutAlerts();
     const combined = { ...global.persistentStore, ...global.devices };
     const now = Date.now();
     const OFFLINE_THRESHOLD_MS = 300000; // 5 minutos
