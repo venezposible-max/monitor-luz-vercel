@@ -1099,12 +1099,32 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
 // Helper: verificar si un chatId es el Titular (Dueño) de un dispositivo
 function checkIsOwner(device, chatId) {
-    if (!device || !chatId) return false;
-    let reqId = String(chatId).trim();
+    if (!device) return true;
+    let reqId = String(chatId || '').trim();
     let devOwnerId = String(device.chatId || '').trim();
     if (reqId === '3307499449') reqId = '330749449';
     if (devOwnerId === '3307499449') devOwnerId = '330749449';
-    return !!(devOwnerId && reqId && devOwnerId === reqId);
+
+    // Lista de invitados registrados
+    const guests = (device.guestChatIds || []).map(g => String(g).trim());
+
+    // Si explícitamente es un familiar invitado registrado -> Invitado (NO Titular)
+    if (reqId && guests.includes(reqId)) {
+        return false;
+    }
+
+    // Si coincide con el Chat ID del titular registrado
+    if (reqId && devOwnerId && reqId === devOwnerId) {
+        return true;
+    }
+
+    // Si no se pasó chatId (acceso directo del titular desde navegador/favoritos)
+    // se reconoce automáticamente como Titular para no bloquear al dueño
+    if (!reqId) {
+        return true;
+    }
+
+    return false;
 }
 
 // 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
@@ -1228,22 +1248,27 @@ app.get('/api/devices', (req, res) => {
 
 // 7. ENDPOINT PARA CONSULTAR EL ESTADO E HISTORIAL (GET /api/status/:id)
 app.get('/api/status/:id', async (req, res) => {
+    if (!isCloudLoaded) {
+        await loadFromCloud();
+    }
     await checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
     const reqChatId = (req.query.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
+    const storedAlias = global.aliases[deviceId] || (device ? device.alias : null) || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
 
     if (!device) {
         return res.json({
             found: false,
             deviceId: deviceId,
+            alias: storedAlias,
             status: 'offline',
             message: 'SE FUE LA LUZ',
             history: [],
-            isOwner: false,
-            isGuest: true,
-            role: 'guest',
-            roleLabel: 'Familiar Invitado'
+            isOwner: true,
+            isGuest: false,
+            role: 'owner',
+            roleLabel: 'Titular'
         });
     }
 
@@ -1256,6 +1281,7 @@ app.get('/api/status/:id', async (req, res) => {
         return res.json({
             found: true,
             deviceId: deviceId,
+            alias: storedAlias,
             lastSeen: device.lastSeen,
             status: 'unlinked',
             message: 'DISPOSITIVO DESVINCULADO',
@@ -1281,7 +1307,7 @@ app.get('/api/status/:id', async (req, res) => {
     return res.json({
         found: true,
         deviceId: deviceId,
-        alias: device.alias || deviceId,
+        alias: storedAlias,
         lastSeen: device.lastSeen,
         onlineSince: device.onlineSince || device.lastSeen,
         elapsedMs: elapsedMs,

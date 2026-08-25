@@ -524,7 +524,12 @@
     function cacheDeviceData(deviceId, data) {
         try {
             const serverHistory = Array.isArray(data.history) ? data.history : [];
+            const alias = data.alias || localStorage.getItem(`alias_${deviceId}`) || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
+            if (alias && alias !== deviceId) {
+                localStorage.setItem(`alias_${deviceId}`, alias);
+            }
             localStorage.setItem(`device_${deviceId}`, JSON.stringify({
+                alias: alias,
                 lastSeen: data.lastSeen,
                 onlineSince: data.onlineSince,
                 elapsedMs: data.elapsedMs,
@@ -559,6 +564,14 @@
             currentUserRole = data.role || (isOwner ? 'owner' : 'guest');
             updateRoleBadge(data);
 
+            // Siempre actualizar y persistir el alias/nombre de la casa
+            const cached = getCachedDeviceData(currentDeviceId);
+            const aliasName = data.alias || (cached && cached.alias) || localStorage.getItem(`alias_${currentDeviceId}`) || (currentDeviceId === 'ESP-51A1B1' ? 'Apto Maracay' : currentDeviceId);
+            document.getElementById('deviceAliasText').textContent = aliasName;
+            if (data.alias && data.alias !== currentDeviceId) {
+                localStorage.setItem(`alias_${currentDeviceId}`, data.alias);
+            }
+
             if (data.status === 'unlinked' && data.found && data.unlinked) {
                 try {
                     localStorage.removeItem(`device_${currentDeviceId}`);
@@ -570,50 +583,18 @@
                 return;
             }
 
-            if (!data.found || data.status === 'offline') {
-                const cached = getCachedDeviceData(currentDeviceId);
-                const defaultCutoff = 1787444040000;
-                const lastSeenTimestamp = data.lastSeen || (cached && cached.lastSeen) || defaultCutoff;
-                
-                let serverHistory = (data.history && data.history.length > 0) ? data.history : (cached && cached.history && cached.history.length > 0 ? cached.history : []);
-                if (serverHistory.length === 0) {
-                    serverHistory = [{
-                        id: 'event_' + defaultCutoff,
-                        start: defaultCutoff,
-                        startTimeStr: '08:14:00 p. m.',
-                        startDateStr: '22/08/2026',
-                        end: null,
-                        endTimeStr: null,
-                        durationStr: 'En curso...',
-                        durationMs: 0
-                    }];
-                }
-
-                const lastDate = new Date(lastSeenTimestamp);
-                const now = Date.now();
-                const elapsedMs = Math.max(0, now - lastSeenTimestamp);
-                const diffMins = Math.floor(elapsedMs / 60000);
-                let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
-
-                renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
-                document.getElementById('uptimeText').textContent = "Sin servicio de luz";
-                document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
-                renderHistory(serverHistory);
-                return;
-            }
-
-            const aliasName = data.alias || currentDeviceId;
-            document.getElementById('deviceAliasText').textContent = aliasName;
-
+            // Guardar en cache y renderizar historial
             const serverHistory = cacheDeviceData(currentDeviceId, data);
-
-            const lastDate = new Date(data.lastSeen);
-            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
-
             renderHistory(serverHistory);
 
-            if (data.elapsedMs < 300000) {
+            const lastSeenTimestamp = data.lastSeen || (cached && cached.lastSeen) || (serverHistory.length > 0 && serverHistory[0].start ? serverHistory[0].start : Date.now());
+            const lastDate = new Date(lastSeenTimestamp);
+            document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+
+            if (data.found && data.status === 'online' && data.elapsedMs < 300000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
+
+                // Formatear Tiempo Continuo con Luz
                 const uptimeMs = data.uptimeMs || 0;
                 const totalMins = Math.floor(uptimeMs / 60000);
                 
@@ -635,19 +616,29 @@
                 }
                 document.getElementById('uptimeText').textContent = uptimeFormatted;
             } else {
-                const diffMins = Math.floor(data.elapsedMs / 60000);
+                // SE FUE LA LUZ / OFFLINE
+                const elapsedMs = data.elapsedMs || Math.max(0, Date.now() - lastSeenTimestamp);
+                const diffMins = Math.floor(elapsedMs / 60000);
                 let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
+
                 renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
                 document.getElementById('uptimeText').textContent = "Sin servicio de luz";
             }
         } catch (e) {
             console.error(e);
             const cached = getCachedDeviceData(currentDeviceId);
+            const cachedAlias = (cached && cached.alias) || localStorage.getItem(`alias_${currentDeviceId}`) || (currentDeviceId === 'ESP-51A1B1' ? 'Apto Maracay' : currentDeviceId);
+            document.getElementById('deviceAliasText').textContent = cachedAlias;
+
             if (cached && cached.lastSeen) {
                 const lastDate = new Date(cached.lastSeen);
-                document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                renderState('offline', 'SE FUE LA LUZ 🔴', 'Sin conexión con el servidor. Mostrando último dato guardado.');
+                document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+                const elapsedMs = Math.max(0, Date.now() - cached.lastSeen);
+                const diffMins = Math.floor(elapsedMs / 60000);
+                let elapsedStr = diffMins < 60 ? `Hace ${diffMins} min` : `Hace ${Math.floor(diffMins / 60)}h y ${diffMins % 60}m`;
+                renderState('offline', 'SE FUE LA LUZ 🔴', `${elapsedStr} que la casa se quedó sin energía.`);
                 document.getElementById('uptimeText').textContent = "Sin servicio de luz";
+                renderHistory(cached.history || []);
             } else {
                 renderState('unknown', 'ERROR CONEXIÓN', 'No se pudo conectar con el servidor.');
             }
