@@ -408,6 +408,28 @@
             <button onclick="changeDeviceId()">Ver Estado</button>
         </div>
     </div>
+
+    <!-- MODAL DE CONFIRMACIÓN PARA BORRAR HISTORIAL -->
+    <div id="clearHistoryModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; padding: 16px; z-index: 9999;">
+        <div style="background: #131b2e; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 20px; padding: 24px; max-width: 420px; width: 100%; box-shadow: 0 20px 50px rgba(0,0,0,0.8); text-align: center;">
+            <div style="font-size: 2.8rem; margin-bottom: 12px;">🗑️</div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; color: #fff; margin-bottom: 8px;">¿Borrar todo el historial?</h3>
+            <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.45; margin-bottom: 16px;">
+                Esta acción vaciará de forma permanente los registros y estadísticas de cortes de luz del dispositivo <b id="modalDevId" style="color:#60a5fa;">---</b>.
+            </p>
+            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; padding: 10px; font-size: 0.78rem; color: #fca5a5; margin-bottom: 20px; text-align: left;">
+                ⚠️ <b>Atención:</b> Los eventos borrados no se podrán recuperar en la Web ni en Telegram.
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button onclick="confirmClearHistoryAction()" style="background: #dc2626; color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 0.92rem; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);">
+                    🗑️ Sí, Borrar Historial Definitivamente
+                </button>
+                <button onclick="closeClearHistoryModal()" style="background: rgba(255, 255, 255, 0.08); color: #cbd5e1; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                    ❌ Cancelar / Desistir (No borrar)
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -737,7 +759,7 @@
         container.innerHTML = html;
     }
 
-    async function clearHistory() {
+    function clearHistory() {
         if (!currentDeviceId) return;
 
         // GUARDIA DE SEGURIDAD PARA INVITADOS
@@ -746,16 +768,39 @@
             return;
         }
 
-        const confirmDelete = confirm(`¿Estás seguro de que deseas BORRAR todo el historial de cortes de luz del dispositivo ${currentDeviceId}?\n\nEsta acción no se puede deshacer.`);
-        if (!confirmDelete) return;
+        const alias = document.getElementById('deviceAliasText') ? document.getElementById('deviceAliasText').textContent : '';
+        const modalDevId = document.getElementById('modalDevId');
+        if (modalDevId) modalDevId.textContent = `${currentDeviceId}${alias && alias !== currentDeviceId ? ` (${alias})` : ''}`;
+
+        const modal = document.getElementById('clearHistoryModal');
+        if (modal) {
+            modal.style.display = 'flex';
+        } else {
+            // Fallback si no estuviera el modal
+            if (confirm(`¿Estás seguro de que deseas BORRAR todo el historial de cortes de luz del dispositivo ${currentDeviceId}?\n\nEsta acción no se puede deshacer.`)) {
+                confirmClearHistoryAction();
+            }
+        }
+    }
+
+    function closeClearHistoryModal() {
+        const modal = document.getElementById('clearHistoryModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    async function confirmClearHistoryAction() {
+        closeClearHistoryModal();
+        if (!currentDeviceId) return;
 
         try {
+            // 1. Limpiar memoria local del navegador inmediatamente
             try {
                 const cached = getCachedDeviceData(currentDeviceId) || {};
                 cached.history = [];
                 localStorage.setItem(`device_${currentDeviceId}`, JSON.stringify(cached));
             } catch(e) {}
 
+            // 2. Limpiar en el servidor backend (y en Telegram)
             const res = await fetch('/api/clear-history', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
