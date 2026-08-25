@@ -1,173 +1,217 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CREALO PowerWatch | Mis Dispositivos</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="/icon.png">
-    <link rel="apple-touch-icon" href="/icon.png">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#10b981">
-    <style>
-        :root { --bg-dark:#090d16; --card-bg:rgba(17,24,39,0.85); --border-color:rgba(255,255,255,0.08); --text-main:#f8fafc; --text-sub:#94a3b8; }
-        *{box-sizing:border-box;margin:0;padding:0;font-family:Inter,system-ui,sans-serif;}
-        body{background-color:var(--bg-dark);color:var(--text-main);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 48px;background-image:radial-gradient(circle at 50% 10%,rgba(16,185,129,0.07),transparent 40%),radial-gradient(circle at 80% 80%,rgba(239,68,68,0.05),transparent 40%);}
-        .container{width:100%;max-width:500px;}
-        .brand-header{display:flex;flex-direction:column;align-items:center;margin-bottom:28px;gap:6px;}
-        .brand-logo-wrap{display:flex;align-items:center;gap:10px;}
-        .brand-logo-svg{width:44px;height:44px;filter:drop-shadow(0 0 12px rgba(249,115,22,0.4));}
-        .brand-name{font-size:1.45rem;font-weight:900;letter-spacing:2px;color:#fff;line-height:1.1;text-transform:uppercase;}
-        .brand-product{font-size:0.82rem;font-weight:600;letter-spacing:3px;color:#f97316;text-transform:uppercase;}
-        .brand-tagline{font-size:0.78rem;color:var(--text-sub);}
-        .summary-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;}
-        .summary-card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:14px;padding:12px;text-align:center;}
-        .summary-number{font-size:1.6rem;font-weight:900;line-height:1;}
-        .summary-label{font-size:0.68rem;color:var(--text-sub);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;}
-        .devices-list{display:flex;flex-direction:column;gap:12px;margin-bottom:24px;}
-        .device-card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:18px;padding:16px;cursor:pointer;transition:all 0.25s ease;position:relative;text-decoration:none;color:inherit;display:block;}
-        .device-card:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,0.4);}
-        .device-card.online{border-color:rgba(16,185,129,0.35);background:rgba(16,185,129,0.05);}
-        .device-card.online:hover{box-shadow:0 8px 30px rgba(16,185,129,0.15);}
-        .device-card.offline{border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.05);}
-        .device-card.offline:hover{box-shadow:0 8px 30px rgba(239,68,68,0.15);}
-        .device-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
-        .device-alias{font-size:1.05rem;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px;}
-        .status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
-        .status-dot.online{background:#10b981;box-shadow:0 0 8px rgba(16,185,129,0.7);animation:pulse-dot 2s ease-in-out infinite;}
-        .status-dot.offline{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,0.6);}
-        .status-dot.unknown{background:#64748b;}
-        @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.7;transform:scale(1.3)}}
-        .status-pill{font-size:0.68rem;font-weight:700;padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:0.5px;}
-        .status-pill.online{background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);}
-        .status-pill.offline{background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);}
-        .status-pill.unknown{background:rgba(100,116,139,0.2);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);}
-        .device-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.75rem;}
-        .device-meta-item{display:flex;flex-direction:column;gap:2px;}
-        .device-meta-label{color:var(--text-sub);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;}
-        .device-meta-value{color:#fff;font-weight:600;}
-        .device-arrow{position:absolute;right:16px;bottom:16px;color:var(--text-sub);font-size:0.9rem;transition:transform 0.2s;}
-        .device-card:hover .device-arrow{transform:translateX(4px);}
-        .loading-spinner{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:14px;}
-        .spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top-color:#10b981;border-radius:50%;animation:spin 0.9s linear infinite;}
-        @keyframes spin{to{transform:rotate(360deg)}}
-        .empty-state{text-align:center;padding:48px 24px;background:var(--card-bg);border:1px dashed var(--border-color);border-radius:18px;}
-        .empty-icon{font-size:3rem;margin-bottom:12px;}
-        .empty-title{font-size:1rem;font-weight:700;color:#fff;margin-bottom:8px;}
-        .empty-desc{font-size:0.82rem;color:var(--text-sub);line-height:1.5;}
-        .manual-search{background:var(--card-bg);border:1px solid var(--border-color);border-radius:18px;padding:18px;margin-top:8px;}
-        .manual-search h4{font-size:0.85rem;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
-        .input-row{display:flex;gap:8px;}
-        .input-row input{flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--border-color);border-radius:10px;padding:10px 14px;color:#fff;font-size:0.88rem;outline:none;}
-        .input-row button{background:#3b82f6;color:white;border:none;border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:0.88rem;}
-        .refresh-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
-        .btn-refresh{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);color:var(--text-sub);padding:7px 14px;border-radius:20px;cursor:pointer;font-weight:600;font-size:0.8rem;display:flex;align-items:center;gap:6px;}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CREALO PowerWatch | Mis Ubicaciones</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#10b981">
+<style>
+:root{--bg:#090d16;--card:rgba(17,24,39,0.85);--border:rgba(255,255,255,0.08);--txt:#f8fafc;--sub:#94a3b8}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,sans-serif}
+body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 48px}
+.wrap{width:100%;max-width:500px}
+.brand{display:flex;flex-direction:column;align-items:center;margin-bottom:28px;gap:6px}
+.brow{display:flex;align-items:center;gap:10px}
+.bsvg{width:44px;height:44px;filter:drop-shadow(0 0 12px rgba(249,115,22,.4))}
+.bname{font-size:1.45rem;font-weight:900;letter-spacing:2px;color:#fff;text-transform:uppercase}
+.bprod{font-size:.82rem;font-weight:600;letter-spacing:3px;color:#f97316;text-transform:uppercase}
+.btag{font-size:.78rem;color:var(--sub)}
+.row{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.ptitle{font-size:1rem;font-weight:700;color:#fff}
+.psub{font-size:.78rem;color:var(--sub);margin-top:2px}
+.btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:var(--sub);padding:7px 14px;border-radius:20px;cursor:pointer;font-weight:600;font-size:.8rem}
+.sumbar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+.sc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;text-align:center}
+.sn{font-size:1.6rem;font-weight:900;line-height:1}
+.sl{font-size:.68rem;color:var(--sub);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.dlist{display:flex;flex-direction:column;gap:12px;margin-bottom:24px}
+.dcard{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;cursor:pointer;transition:all .25s;position:relative;text-decoration:none;color:inherit;display:block}
+.dcard:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.dcard.online{border-color:rgba(16,185,129,.35);background:rgba(16,185,129,.05)}
+.dcard.offline{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.05)}
+.dhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.dalias{font-size:1.05rem;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot.online{background:#10b981;box-shadow:0 0 8px rgba(16,185,129,.7);animation:pd 2s ease-in-out infinite}
+.dot.offline{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,.6)}
+.dot.unknown{background:#64748b}
+@keyframes pd{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(1.3)}}
+.pill{font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.5px}
+.pill.online{background:rgba(16,185,129,.2);color:#34d399;border:1px solid rgba(16,185,129,.4)}
+.pill.offline{background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
+.pill.unknown{background:rgba(100,116,139,.2);color:#94a3b8;border:1px solid rgba(100,116,139,.3)}
+.dmeta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.75rem}
+.dmi{display:flex;flex-direction:column;gap:2px}
+.dml{color:var(--sub);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.dmv{color:#fff;font-weight:600}
+.darr{position:absolute;right:16px;bottom:16px;color:var(--sub);font-size:.9rem;transition:transform .2s}
+.dcard:hover .darr{transform:translateX(4px)}
+.spin{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:18px}
+.spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.1);border-top-color:#10b981;border-radius:50%;animation:sp .9s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:40px 24px;background:var(--card);border:1px dashed var(--border);border-radius:18px}
+.eicon{font-size:2.5rem;margin-bottom:10px}
+.etit{font-size:1rem;font-weight:700;color:#fff;margin-bottom:6px}
+.edesc{font-size:.82rem;color:var(--sub);line-height:1.5}
+.msearch{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:18px;margin-top:8px}
+.msearch h4{font-size:.85rem;font-weight:700;margin-bottom:10px}
+.irow{display:flex;gap:8px}
+.irow input{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:#fff;font-size:.88rem;outline:none}
+.irow button{background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.88rem}
+</style>
 </head>
 <body>
-<div class="container">
-    <div class="brand-header">
-        <div class="brand-logo-wrap">
-            <svg class="brand-logo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="50" cy="50" r="44" stroke="#f97316" stroke-width="7" stroke-dasharray="180 30" stroke-linecap="round"/>
-                <circle cx="50" cy="50" r="38" fill="#1e293b"/>
-                <circle cx="50" cy="50" r="30" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="2 6"/>
-                <path d="M 68 34 A 7 7 0 1 1 61 27" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
-                <line x1="65" y1="23" x2="65" y2="30" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
-                <polygon points="53,16 35,50 49,50 43,84 65,44 51,44" fill="#f97316" filter="drop-shadow(0 0 6px #ea580c)"/>
-            </svg>
-            <div>
-                <div class="brand-name">CREALO</div>
-                <div class="brand-product">PowerWatch</div>
-            </div>
-        </div>
-        <div class="brand-tagline">Panel de Administracion</div>
+<div class="wrap">
+  <div class="brand">
+    <div class="brow">
+      <svg class="bsvg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="44" stroke="#f97316" stroke-width="7" stroke-dasharray="180 30" stroke-linecap="round"/>
+        <circle cx="50" cy="50" r="38" fill="#1e293b"/>
+        <circle cx="50" cy="50" r="30" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="2 6"/>
+        <path d="M 68 34 A 7 7 0 1 1 61 27" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="65" y1="23" x2="65" y2="30" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
+        <polygon points="53,16 35,50 49,50 43,84 65,44 51,44" fill="#f97316"/>
+      </svg>
+      <div>
+        <div class="bname">CREALO</div>
+        <div class="bprod">PowerWatch</div>
+      </div>
     </div>
-    <div class="refresh-row">
-        <div>
-            <div style="font-size:1rem;font-weight:700;color:#fff;">&#128205; Mis Ubicaciones</div>
-            <div style="font-size:0.78rem;color:var(--text-sub);margin-top:2px;" id="lastUpdatedText">Actualizando...</div>
-        </div>
-        <button class="btn-refresh" onclick="loadDevices()">&#128260; Actualizar</button>
+    <div class="btag">Panel de Administracion</div>
+  </div>
+
+  <div class="row">
+    <div>
+      <div class="ptitle">&#128205; Mis Ubicaciones</div>
+      <div class="psub" id="tsub">Cargando...</div>
     </div>
-    <div class="summary-bar">
-        <div class="summary-card"><div class="summary-number" id="totalCount" style="color:#fff;">-</div><div class="summary-label">Total</div></div>
-        <div class="summary-card"><div class="summary-number" id="onlineCount" style="color:#10b981;">-</div><div class="summary-label">Con Luz</div></div>
-        <div class="summary-card"><div class="summary-number" id="offlineCount" style="color:#ef4444;">-</div><div class="summary-label">Sin Luz</div></div>
+    <button class="btn" onclick="load()">&#128260; Actualizar</button>
+  </div>
+
+  <div class="sumbar">
+    <div class="sc"><div class="sn" id="stotal" style="color:#fff">-</div><div class="sl">Total</div></div>
+    <div class="sc"><div class="sn" id="son" style="color:#10b981">-</div><div class="sl">Con Luz</div></div>
+    <div class="sc"><div class="sn" id="soff" style="color:#ef4444">-</div><div class="sl">Sin Luz</div></div>
+  </div>
+
+  <div id="dlist" class="dlist">
+    <div class="spin"><div class="spinner"></div><span style="color:var(--sub);font-size:.85rem">Conectando...</span></div>
+  </div>
+
+  <div class="msearch">
+    <h4>&#128269; Buscar por ID de Placa</h4>
+    <div class="irow">
+      <input type="text" id="mid" placeholder="Ej: ESP-A1B2C3" maxlength="20">
+      <button onclick="go()">Ver</button>
     </div>
-    <div id="devicesList" class="devices-list">
-        <div class="loading-spinner"><div class="spinner"></div><span style="color:var(--text-sub);font-size:0.85rem;">Cargando dispositivos...</span></div>
-    </div>
-    <div class="manual-search">
-        <h4>&#128269; Buscar por ID de Placa</h4>
-        <div class="input-row">
-            <input type="text" id="manualIdInput" placeholder="Ej: ESP-A1B2C3" maxlength="20" onkeydown="if(event.key===&apos;Enter&apos;) goToDevice()">
-            <button onclick="goToDevice()">Ver</button>
-        </div>
-    </div>
+  </div>
 </div>
+
 <script>
-var currentChatId="";
-function getQP(p){return new URLSearchParams(window.location.search).get(p);}
-function fmtEl(ms){if(!ms||ms<=0)return"Ahora mismo";var m=Math.floor(ms/60000);if(m<1)return"Hace menos de 1 min";if(m<60)return"Hace "+m+" min";var h=Math.floor(m/60);if(h<24)return"Hace "+h+"h "+(m%60)+"m";return"Hace "+Math.floor(h/24)+"d "+(h%24)+"h";}
-function fmtUp(ms){if(!ms||ms<=0)return"-";var m=Math.floor(ms/60000);if(m<1)return"menos de 1 min";if(m<60)return m+" min";var h=Math.floor(m/60);if(h<24)return h+"h "+(m%60)+"m";return Math.floor(h/24)+"d "+(h%24)+"h";}
-function wkCuts(history){if(!history||!history.length)return 0;var w=Date.now()-7*24*60*60*1000;return history.filter(function(h){return h.start&&h.start>=w;}).length;}
-async function loadDevices(){
-    var listEl=document.getElementById("devicesList");
-    try{
-        var cidQ=currentChatId?"?chatId="+encodeURIComponent(currentChatId):"";
-        var res=await fetch("/api/devices-list"+cidQ);
-        var data=await res.json();
-        var devices=Array.isArray(data.devices)?data.devices:[];
-        var on=devices.filter(function(d){return d.statusCode==="online";}).length;
-        var off=devices.filter(function(d){return d.statusCode==="offline";}).length;
-        document.getElementById("totalCount").textContent=devices.length;
-        document.getElementById("onlineCount").textContent=on;
-        document.getElementById("offlineCount").textContent=off;
-        var now=new Date();
-        document.getElementById("lastUpdatedText").textContent="Actualizado: "+now.toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true,timeZone:"America/Caracas"});
-        if(devices.length===0){listEl.innerHTML="<div class="empty-state"><div class="empty-icon">&#128225;</div><div class="empty-title">No hay dispositivos registrados</div><div class="empty-desc">Cuando tu placa envie su primer reporte aparecera aqui.</div></div>";return;}
-        devices.sort(function(a,b){if(a.statusCode==="offline"&&b.statusCode!=="offline")return -1;if(a.statusCode!=="offline"&&b.statusCode==="offline")return 1;return(b.lastSeen||0)-(a.lastSeen||0);});
-        var html="";
-        devices.forEach(function(device){
-            var sc=device.statusCode||"unknown";
-            var alias=device.alias||device.deviceId;
-            var cp=currentChatId?"&chatId="+encodeURIComponent(currentChatId):"";
-            var url="/?id="+encodeURIComponent(device.deviceId)+cp;
-            var pillTxt={online:"&#9889; Con Luz",offline:"&#128308; Sin Luz",unknown:"- Desconocido"};
-            var pt=pillTxt[sc]||pillTxt.unknown;
-            var elapsed=device.elapsedMs?fmtEl(device.elapsedMs):fmtEl(device.lastSeen?Date.now()-device.lastSeen:0);
-            var uptime=device.uptimeMs?fmtUp(device.uptimeMs):"-";
-            var cuts=wkCuts(device.history);
-            var ls=device.lastSeen?new Date(device.lastSeen).toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:"America/Caracas"}):"-";
-            html+="<a class="device-card "+sc+"" href=""+url+"">"+
-                "<div class="device-card-header">"+
-                    "<div class="device-alias"><span class="status-dot "+sc+""></span>"+alias+"</div>"+
-                    "<span class="status-pill "+sc+"">"+pt+"</span>"+
-                "</div>"+
-                "<div class="device-meta">"+
-                    "<div class="device-meta-item"><span class="device-meta-label">ID Placa</span><span class="device-meta-value" style="font-family:monospace;font-size:0.8rem;">"+device.deviceId+"</span></div>"+
-                    "<div class="device-meta-item"><span class="device-meta-label">Ultimo Reporte</span><span class="device-meta-value">"+ls+"</span></div>"+
-                    "<div class="device-meta-item"><span class="device-meta-label">"+( sc==="online"?"Con Luz":"Sin Luz")+"</span><span class="device-meta-value">"+( sc==="online"?uptime:elapsed)+"</span></div>"+
-                    "<div class="device-meta-item"><span class="device-meta-label">Cortes semana</span><span class="device-meta-value">"+cuts+"</span></div>"+
-                "</div>"+
-                "<span class="device-arrow">&#8594;</span>"+
-            "</a>";
-        });
-        listEl.innerHTML=html;
-    }catch(e){console.error(e);listEl.innerHTML="<div class="empty-state"><div class="empty-icon">&#9888;&#65039;</div><div class="empty-title">Error al cargar</div><div class="empty-desc">No se pudo conectar con el servidor.</div></div>";}
+var cid = localStorage.getItem('monitor_chat_id') || '';
+
+function qp(p){ return new URLSearchParams(location.search).get(p); }
+
+function fel(ms){
+  if(!ms||ms<=0) return 'Ahora mismo';
+  var m=Math.floor(ms/60000);
+  if(m<1) return 'Hace un momento';
+  if(m<60) return 'Hace '+m+' min';
+  var h=Math.floor(m/60);
+  if(h<24) return 'Hace '+h+'h '+(m%60)+'m';
+  return 'Hace '+Math.floor(h/24)+'d '+(h%24)+'h';
 }
-function goToDevice(){var v=document.getElementById("manualIdInput").value.trim().toUpperCase();if(!v)return;window.location.href="/?id="+encodeURIComponent(v)+(currentChatId?"&chatId="+encodeURIComponent(currentChatId):"");}
-async function init(){
-    var cid=getQP("chatId")||getQP("chat_id")||getQP("cid");
-    if(cid){currentChatId=cid.trim();localStorage.setItem("monitor_chat_id",currentChatId);}
-    else{currentChatId=localStorage.getItem("monitor_chat_id")||"";}
-    await loadDevices();
-    setInterval(loadDevices,15000);
+
+function fup(ms){
+  if(!ms||ms<=0) return '-';
+  var m=Math.floor(ms/60000);
+  if(m<1) return '<1 min';
+  if(m<60) return m+' min';
+  var h=Math.floor(m/60);
+  if(h<24) return h+'h '+(m%60)+'m';
+  return Math.floor(h/24)+'d '+(h%24)+'h';
 }
-window.onload=init;
+
+function wkc(hist){
+  if(!hist||!hist.length) return 0;
+  var w=Date.now()-604800000;
+  return hist.filter(function(x){return x.start&&x.start>=w;}).length;
+}
+
+async function load(){
+  var el=document.getElementById('dlist');
+  document.getElementById('tsub').textContent='Actualizando...';
+  try{
+    var q=cid?('?chatId='+encodeURIComponent(cid)):'';
+    var ctrl=new AbortController();
+    var tmr=setTimeout(function(){ctrl.abort();},12000);
+    var res=await fetch('/api/devices-list'+q,{signal:ctrl.signal});
+    clearTimeout(tmr);
+    var data=await res.json();
+    var devs=Array.isArray(data.devices)?data.devices:[];
+    var on=devs.filter(function(d){return d.statusCode==='online';}).length;
+    var off=devs.filter(function(d){return d.statusCode==='offline';}).length;
+    document.getElementById('stotal').textContent=devs.length;
+    document.getElementById('son').textContent=on;
+    document.getElementById('soff').textContent=off;
+    var now=new Date();
+    document.getElementById('tsub').textContent='Actualizado: '+now.toLocaleTimeString('es-VE',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true,timeZone:'America/Caracas'});
+    if(devs.length===0){
+      el.innerHTML='<div class="empty"><div class="eicon">&#128225;</div><div class="etit">Sin dispositivos aun</div><div class="edesc">Presiona Actualizar en unos segundos mientras el servidor carga los datos.</div><br><button class="btn" onclick="load()" style="margin:0 auto;display:block;">&#128260; Reintentar</button></div>';
+      return;
+    }
+    devs.sort(function(a,b){
+      if(a.statusCode==='offline'&&b.statusCode!=='offline') return -1;
+      if(a.statusCode!=='offline'&&b.statusCode==='offline') return 1;
+      return (b.lastSeen||0)-(a.lastSeen||0);
+    });
+    var html='';
+    for(var i=0;i<devs.length;i++){
+      var d=devs[i];
+      var sc=d.statusCode||'unknown';
+      var al=d.alias||d.deviceId;
+      var cp=cid?('&chatId='+encodeURIComponent(cid)):'';
+      var url='/?id='+encodeURIComponent(d.deviceId)+cp;
+      var pt=sc==='online'?'&#9889; Con Luz':(sc==='offline'?'&#128308; Sin Luz':'- Desconocido');
+      var el2=sc==='online'?fup(d.uptimeMs):fel(d.elapsedMs);
+      var cuts=wkc(d.history);
+      var ls=d.lastSeen?new Date(d.lastSeen).toLocaleTimeString('es-VE',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/Caracas'}):'-';
+      html+='<a class="dcard '+sc+'" href="'+url+'">';
+      html+='<div class="dhead"><div class="dalias"><span class="dot '+sc+'"></span>'+al+'</div>';
+      html+='<span class="pill '+sc+'">'+pt+'</span></div>';
+      html+='<div class="dmeta">';
+      html+='<div class="dmi"><span class="dml">ID Placa</span><span class="dmv" style="font-family:monospace;font-size:.8rem">'+d.deviceId+'</span></div>';
+      html+='<div class="dmi"><span class="dml">Ultimo Reporte</span><span class="dmv">'+ls+'</span></div>';
+      html+='<div class="dmi"><span class="dml">'+(sc==='online'?'Con Luz':'Sin Luz')+'</span><span class="dmv">'+el2+'</span></div>';
+      html+='<div class="dmi"><span class="dml">Cortes semana</span><span class="dmv">'+cuts+'</span></div>';
+      html+='</div><span class="darr">&#8594;</span></a>';
+    }
+    el.innerHTML=html;
+  }catch(err){
+    document.getElementById('tsub').textContent='Error al cargar';
+    el.innerHTML='<div class="empty"><div class="eicon">&#9888;&#65039;</div><div class="etit">No se pudo conectar</div><div class="edesc">'+err.message+'</div><br><button class="btn" onclick="load()" style="margin:0 auto;display:block;">&#128260; Reintentar</button></div>';
+  }
+}
+
+function go(){
+  var v=document.getElementById('mid').value.trim().toUpperCase();
+  if(!v) return;
+  location.href='/?id='+encodeURIComponent(v)+(cid?('&chatId='+encodeURIComponent(cid)):'');
+}
+
+document.getElementById('mid').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
+
+(function init(){
+  var c=qp('chatId')||qp('chat_id')||qp('cid');
+  if(c){cid=c.trim();localStorage.setItem('monitor_chat_id',cid);}
+  load();
+  setInterval(load,20000);
+})();
 </script>
 </body>
 </html>
