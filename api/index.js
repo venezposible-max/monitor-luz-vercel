@@ -659,7 +659,9 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         }
 
-        if (targetChatId) {
+        // Solo enviar notificaciones de regreso a Telegram si el corte duró 5 minutos o más (300000 ms)
+        // Esto evita recibir una alerta de "Servicio Restablecido" si nunca te avisó de la desconexión
+        if (targetChatId && durationMs >= 300000) {
             console.log(`[NOTIF REGRESO] Enviando aviso a Telegram para ${deviceId} a chatId ${targetChatId}`);
             await sendTelegramMessage(targetChatId, returnMsg);
 
