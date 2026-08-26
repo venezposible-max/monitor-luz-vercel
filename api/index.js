@@ -270,6 +270,7 @@ function setupTelegramCommands() {
                 { command: "casas", description: "🏠 Mis Casas / Monitores" },
                 { command: "reporte", description: "📈 Reporte semanal de estabilidad" },
                 { command: "historial", description: "📜 Ver lista y duración de cortes" },
+                { command: "chatid", description: "🆔 Ver mi Chat ID de Telegram" },
                 { command: "reiniciar", description: "🔄 Reiniciar WiFi de la placa" }
             ]
         });
@@ -1074,6 +1075,14 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     ]
                 );
             }
+
+        } else if (text.includes('/chatid') || text.includes('chatid') || text.includes('mi id')) {
+            await sendTelegramMessage(chatId,
+                `🆔 <b>Tu Chat ID de Telegram:</b>\n\n` +
+                `<code>${chatId}</code>\n\n` +
+                `💡 <i>Toca el número arriba para copiarlo automáticamente con 1 toque.</i>`,
+                [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
+            );
 
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const myDevs = getMyDevs();
