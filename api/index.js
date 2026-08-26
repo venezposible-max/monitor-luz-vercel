@@ -270,7 +270,6 @@ function setupTelegramCommands() {
                 { command: "casas", description: "🏠 Mis Casas / Monitores" },
                 { command: "reporte", description: "📈 Reporte semanal de estabilidad" },
                 { command: "historial", description: "📜 Ver lista y duración de cortes" },
-                { command: "clima", description: "🌤️ Ver el clima en tu ciudad" },
                 { command: "reiniciar", description: "🔄 Reiniciar WiFi de la placa" }
             ]
         });
