@@ -594,7 +594,7 @@
             const lastDate = new Date(lastSeenTimestamp);
             document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
-            if (data.found && data.status === 'online' && data.elapsedMs < 300000) {
+            if (data.found && data.status === 'online' && data.elapsedMs < 480000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
 
                 // Formatear Tiempo Continuo con Luz
@@ -618,6 +618,10 @@
                     }
                 }
                 document.getElementById('uptimeText').textContent = uptimeFormatted;
+            } else if (data.found && data.status === 'unlinked') {
+                // DESVINCULADO
+                renderState('unlinked', 'DISPOSITIVO DESVINCULADO ⚠️', 'Este dispositivo no está vinculado a ninguna cuenta. Por favor configúralo de nuevo.');
+                document.getElementById('uptimeText').textContent = "-";
             } else {
                 // SE FUE LA LUZ / OFFLINE
                 const elapsedMs = data.elapsedMs || Math.max(0, Date.now() - lastSeenTimestamp);
