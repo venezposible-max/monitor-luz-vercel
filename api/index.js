@@ -906,10 +906,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             return res.status(200).send('OK');
         }
 
-        // Helper local: buscar dispositivos de un usuario (dueño o invitado)
+        // Helper local: buscar dispositivos de un usuario (dueño o invitado) — excluir desvinculados
         const getMyDevs = () => devs.filter(d =>
-            String(d.chatId).trim() === chatId ||
-            (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId))
+            !d.unlinked &&
+            (String(d.chatId).trim() === chatId ||
+            (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId)))
         );
 
         // --- COMANDOS PRINCIPALES ---
