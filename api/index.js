@@ -599,6 +599,9 @@ async function checkBlackoutAlerts() {
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', async (req, res) => {
+    if (!isCloudLoaded) {
+        await loadFromCloud();
+    }
     loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
@@ -828,6 +831,9 @@ app.post('/api/ping', async (req, res) => {
 
 // 2. ENDPOINT WEBHOOK TELEGRAM — CORRECTO: procesar y enviar respuesta PRIMERO, luego 200 OK
 app.post('/api/telegram-webhook', async (req, res) => {
+    if (!isCloudLoaded) {
+        await loadFromCloud();
+    }
     try {
         const update = req.body;
         if (!update) return res.status(200).send('OK');
