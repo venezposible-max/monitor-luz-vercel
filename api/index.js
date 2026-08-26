@@ -1077,10 +1077,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
         } else if (text.includes('/chatid') || text.includes('chatid') || text.includes('mi id')) {
-            await sendTelegramMessage(chatId,
-                `🆔 <b>Tu Chat ID de Telegram:</b>\n\n` +
-                `<code>${chatId}</code>\n\n` +
-                `💡 <i>Toca el número arriba para copiarlo automáticamente con 1 toque.</i>`,
+            await sendTelegramMessage(chatId, `🆔 <b>Tu Chat ID de Telegram:</b>`, []);
+            await sendTelegramMessage(chatId, `<code>${chatId}</code>`, []);
+            await sendTelegramMessage(chatId, `💡 <i>Toca el número arriba para copiarlo automáticamente con 1 toque.</i>`,
                 [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
             );
 
