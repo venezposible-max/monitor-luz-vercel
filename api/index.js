@@ -4,6 +4,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+// 1. INICIALIZACIONES Y VARIABLES GLOBALES (Redespliegue de caché)
+
 const app = express();
 
 app.use(cors());
