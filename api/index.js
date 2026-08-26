@@ -940,22 +940,53 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, txt, btns);
             }
 
+        } else if (text.startsWith('/historial_')) {
+            const devId = text.replace('/historial_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
+            await sendTelegramMessage(chatId,
+                dev ? buildHistoryMsg(dev, chatId) : `⚠️ No encontré el dispositivo <code>${devId}</code>.`,
+                [[{ text: '📊 Estado en Vivo', callback_data: `/estado_${devId}` }],
+                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]]
+            );
+
         } else if (text.includes('/historial') || text.includes('historial') || text.includes('cortes')) {
             const myDevs = getMyDevs();
-            const myDev = myDevs.length > 0 ? myDevs[0] : devs.sort((a, b) => b.lastSeen - a.lastSeen)[0];
+            if (myDevs.length === 0) {
+                await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
+            } else if (myDevs.length > 1) {
+                await sendTelegramMessage(chatId, `📜 <b>¿De cuál monitor deseas ver el historial de cortes?</b>`,
+                    myDevs.map(d => [{ text: `📜 ${d.alias || d.deviceId}`, callback_data: `/historial_${d.deviceId}` }])
+                );
+            } else {
+                await sendTelegramMessage(chatId, buildHistoryMsg(myDevs[0], chatId), [
+                    [{ text: '📊 Estado en Vivo', callback_data: `/estado_${myDevs[0].deviceId}` }],
+                    [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                ]);
+            }
+
+        } else if (text.startsWith('/reporte_')) {
+            const devId = text.replace('/reporte_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
             await sendTelegramMessage(chatId,
-                myDev ? buildHistoryMsg(myDev, chatId) : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
-                [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
+                dev ? (buildWeeklyReport(dev, chatId) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré el dispositivo <code>${devId}</code>.`,
+                [[{ text: '📊 Estado en Vivo', callback_data: `/estado_${devId}` }],
                  [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]]
             );
 
         } else if (text.includes('/reporte') || text.includes('reporte') || text.includes('semanal')) {
             const myDevs = getMyDevs();
-            const myDev = myDevs.length > 0 ? myDevs[0] : null;
-            await sendTelegramMessage(chatId,
-                myDev ? (buildWeeklyReport(myDev, chatId) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré tu dispositivo. Chat ID: <code>${chatId}</code>`,
-                [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
-            );
+            if (myDevs.length === 0) {
+                await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
+            } else if (myDevs.length > 1) {
+                await sendTelegramMessage(chatId, `📈 <b>¿De cuál monitor deseas generar el reporte semanal?</b>`,
+                    myDevs.map(d => [{ text: `📈 ${d.alias || d.deviceId}`, callback_data: `/reporte_${d.deviceId}` }])
+                );
+            } else {
+                await sendTelegramMessage(chatId, buildWeeklyReport(myDevs[0], chatId) || '⚠️ Sin datos suficientes.', [
+                    [{ text: '📊 Estado en Vivo', callback_data: `/estado_${myDevs[0].deviceId}` }],
+                    [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                ]);
+            }
 
         } else if (text.includes('/nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
             const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
