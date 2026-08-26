@@ -544,10 +544,27 @@ app.post('/api/ping', async (req, res) => {
         global.aliases[deviceId] = deviceAlias;
     }
 
-    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 90s)
     const hasOpenCut = history.length > 0 && !history[0].end;
-    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 90000) : false;
-    const isReturnFromBlackout = wasBlackout || hasOpenCut || timeGapExceeded || (offlinePings > 0);
+
+    // Calcular momento aproximado de inicio del evento
+    let blackoutStart = null;
+    if (hasOpenCut && history[0].start) {
+        blackoutStart = history[0].start;
+    } else if (existing.blackoutStartTime) {
+        blackoutStart = existing.blackoutStartTime;
+    } else if (existing.lastSeen) {
+        blackoutStart = existing.lastSeen;
+    } else {
+        blackoutStart = now - 240000;
+    }
+    const computedDurationMs = Math.max(now - blackoutStart, 60000);
+
+    // SI REGRESÓ LA LUZ / INTERNET TRAS UN CORTE (detectado por wasBlackout, corte abierto en historial, o brecha de tiempo >= 180s)
+    const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 180000) : false;
+    
+    // Solo consideramos regreso si fue notificado como corte o si la desconexión total es de al menos 3 minutos
+    const isReturnFromBlackout = wasBlackout || 
+        ((hasOpenCut || timeGapExceeded || (offlinePings > 0)) && computedDurationMs >= 180000);
 
     // Determinar la fecha de encendido inicial (onlineSince)
     let onlineSince = existing.onlineSince || (boardUptimeMs > 0 ? (now - boardUptimeMs) : now);
@@ -556,19 +573,7 @@ app.post('/api/ping', async (req, res) => {
     }
 
     if (isReturnFromBlackout && (existing.lastSeen || existing.blackoutStartTime || hasOpenCut)) {
-        // Obtener el momento real del corte:
-        let blackoutStart = null;
-        if (hasOpenCut && history[0].start) {
-            blackoutStart = history[0].start;
-        } else if (existing.blackoutStartTime) {
-            blackoutStart = existing.blackoutStartTime;
-        } else if (existing.lastSeen) {
-            blackoutStart = existing.lastSeen;
-        } else {
-            blackoutStart = now - 240000;
-        }
-
-        const durationMs = Math.max(now - blackoutStart, 60000);
+        const durationMs = computedDurationMs;
         const totalMins = Math.round(durationMs / 60000);
 
         let durationFormatted = "";
