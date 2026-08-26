@@ -619,10 +619,23 @@ app.post('/api/ping', async (req, res) => {
     let history = existing.history || [];
 
     const offlinePings = parseInt(req.body.offlinePings || req.body.missedPings || 0, 10);
-    // Prioridad estricta de alias: preservar siempre el alias personalizado guardado previamente
+    // Prioridad de alias y lógica especial de desvinculación al reiniciar
     const incomingAlias = (req.body.alias || req.body.name || '').toString().trim();
     const storedAlias = global.aliases[deviceId] || existing.alias;
     let deviceAlias = (storedAlias && storedAlias !== deviceId) ? storedAlias : ((incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId);
+
+    let isUnlinkedNow = existing.unlinked || false;
+    if (shouldReset) {
+        targetChatId = ''; // Eliminar la relación del Chat ID propietario
+        existing.guestChatIds = []; // Eliminar todos los familiares
+        deviceAlias = deviceId; // Eliminar el alias del dispositivo
+        if (global.aliases[deviceId]) delete global.aliases[deviceId];
+        isUnlinkedNow = true;
+    } else if (chatId) {
+        // Si hace ping con un chatId nuevo o existente (revinculación tras configurar de nuevo)
+        isUnlinkedNow = false;
+    }
+
     if (deviceAlias && deviceAlias !== deviceId) {
         global.aliases[deviceId] = deviceAlias;
     }
@@ -646,8 +659,12 @@ app.post('/api/ping', async (req, res) => {
     const timeGapExceeded = existing.lastSeen ? (now - existing.lastSeen >= 180000) : false;
     
     // Solo consideramos regreso si fue notificado como corte o si la desconexión total es de al menos 3 minutos
-    const isReturnFromBlackout = wasBlackout || 
+    let isReturnFromBlackout = wasBlackout || 
         ((hasOpenCut || timeGapExceeded || (offlinePings > 0)) && computedDurationMs >= 180000);
+
+    if (shouldReset) {
+        isReturnFromBlackout = false;
+    }
 
     // Determinar la fecha de encendido inicial (onlineSince)
     let onlineSince = existing.onlineSince || (boardUptimeMs > 0 ? (now - boardUptimeMs) : now);
@@ -775,7 +792,7 @@ app.post('/api/ping', async (req, res) => {
         blackoutStartTime: null,
         history: history,
         resetRequested: false,
-        unlinked: false, // El dispositivo ya está vinculado y reportando
+        unlinked: isUnlinkedNow, 
         ip: incomingIp,
         city: existing.city || '',
         region: existing.region || '',
@@ -1292,7 +1309,7 @@ app.post('/api/reset-wifi', async (req, res) => {
 });
 
 // 3.1 ENDPOINT CUANDO EL DISPOSITIVO SE DESVINCULA (POST /api/device-unlinked)
-app.post('/api/device-unlinked', (req, res) => {
+app.post('/api/device-unlinked', async (req, res) => {
     loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const device = getDevice(deviceId);
@@ -1300,8 +1317,12 @@ app.post('/api/device-unlinked', (req, res) => {
     if (device) {
         device.unlinked = true;
         device.chatId = '';
+        device.guestChatIds = []; // Limpiar familiares
+        device.alias = deviceId; // Restablecer alias
+        if (global.aliases[deviceId]) delete global.aliases[deviceId];
         device.blackoutNotified = false;
         persistDevice(deviceId, device);
+        await saveToCloud();
     }
 
     return res.json({ success: true, message: 'Dispositivo marcado como desvinculado.' });
