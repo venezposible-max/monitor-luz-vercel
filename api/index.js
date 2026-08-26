@@ -84,6 +84,37 @@ async function saveToCloud() {
     }
 }
 
+// Obtener geolocalización de una IP de forma asíncrona y no-bloqueante
+async function updateDeviceLocation(deviceId, ip) {
+    if (!ip || ip === '0.0.0.0' || ip === '127.0.0.1') return;
+    try {
+        const url = `http://ip-api.com/json/${ip}?fields=status,regionName,city,isp`;
+        const http = require('http');
+        http.get(url, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', async () => {
+                try {
+                    const json = JSON.parse(data);
+                    if (res.statusCode === 200 && json.status === 'success') {
+                        const device = getDevice(deviceId);
+                        if (device) {
+                            device.city = json.city || '';
+                            device.region = json.regionName || '';
+                            device.isp = json.isp || '';
+                            persistDevice(deviceId, device);
+                            await saveToCloud();
+                            console.log(`[GEO] Geolocalización exitosa para ${deviceId}: ${json.city}, ${json.regionName} (${json.isp})`);
+                        }
+                    }
+                } catch(e) {}
+            });
+        }).on('error', () => {});
+    } catch (e) {
+        console.error('[GEO ERROR]:', e.message);
+    }
+}
+
 // Cargar datos del archivo /tmp y de Redis en la nube al iniciar
 function loadFromDisk() {
     try {
@@ -411,6 +442,10 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const activeDevId = dev.deviceId || devId;
     const webLink = getWebUrl(activeDevId, targetChatId || dev.chatId);
 
+    const geoInfo = (dev.city && dev.isp) ? 
+        `🏢 <b>Ciudad:</b> ${dev.city}, ${dev.region || ''}\n` +
+        `🌐 <b>Red:</b> ${dev.isp}\n` : '';
+
     if (online) {
         const up = now - (dev.onlineSince || lastSeen);
         const h = Math.floor(up / 3600000);
@@ -418,6 +453,7 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
         const uptimeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
         return `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
                `📍 <b>Ubicación:</b> ${name}\n` +
+               geoInfo +
                `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
                `📡 <b>Último reporte:</b> Hace ${Math.max(0, Math.floor(elapsed / 1000))} segundos\n\n` +
@@ -430,6 +466,7 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
         const ds = dt.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
         return `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
                `📍 <b>Ubicación:</b> ${name}\n` +
+               geoInfo +
                `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `🕐 <b>Último reporte:</b> ${ts} (${ds})\n` +
                `⏱️ <b>Tiempo sin luz:</b> ${t}\n\n` +
@@ -529,8 +566,9 @@ async function checkBlackoutAlerts() {
                 history: dev.history
             });
 
+            const geoSuffix = (dev.city && dev.isp) ? ` <i>(${dev.city}, ${dev.region || ''} — ${dev.isp} 🌐)</i>` : '';
             const alertMsg = `⚠️ <b>¡ALERTA DE DESCONEXIÓN! 🔌🌐</b>\n\n` +
-                             `📍 <b>Ubicación:</b> <code>${dev.alias || dev.deviceId}</code>\n` +
+                             `📍 <b>Ubicación:</b> <code>${dev.alias || dev.deviceId}</code>${geoSuffix}\n` +
                              `⏰ <b>Hora aproximada del evento:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
                              `Tu dispositivo ha dejado de transmitir señal.\n` +
                              `💡 <i>Esto puede deberse a:</i>\n` +
@@ -677,10 +715,12 @@ app.post('/api/ping', async (req, res) => {
         // Limitar historial a los últimos 50 eventos
         if (history.length > 50) history = history.slice(0, 50);
 
+        const geoSuffix = (existing.city && existing.isp) ? ` <i>(${existing.city}, ${existing.region || ''} — ${existing.isp} 🌐)</i>` : '';
+
         let returnMsg = "";
         if (eventType === 'fluctuation') {
             returnMsg = `⚡ <b>¡ENERGÍA / RED NORMALIZADA!</b>\n\n` +
-                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
                         `⏰ <b>Hora de restablecimiento:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
                         `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o una micro-caída de internet en tu casa.</i>\n\n` +
@@ -688,7 +728,7 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         } else if (eventType === 'internet_drop') {
             returnMsg = `🌐 <b>¡SERVICIO DE INTERNET RESTABLECIDO!</b>\n\n` +
-                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
                         `⏰ <b>Hora de reconexión:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo sin conexión:</b> ${durationFormatted}\n\n` +
                         `💡 <i>Confirmado: **En tu casa SÍ hubo luz todo el tiempo**. La falla fue exclusivamente de tu **proveedor de internet (CANTV/Fibra)**.</i>\n\n` +
@@ -696,7 +736,7 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         } else {
             returnMsg = `⚡ <b>¡VOLVIÓ LA LUZ!</b>\n\n` +
-                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
                         `⏰ <b>Hora de regreso:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo que duró el corte:</b> ${durationFormatted}\n\n` +
                         `La energía eléctrica ha regresado a tu casa.\n\n` +
@@ -722,6 +762,8 @@ app.post('/api/ping', async (req, res) => {
         }
     }
 
+    const incomingIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0';
+
     const devData = {
         deviceId: deviceId,
         alias: deviceAlias,
@@ -734,12 +776,22 @@ app.post('/api/ping', async (req, res) => {
         history: history,
         resetRequested: false,
         unlinked: false, // El dispositivo ya está vinculado y reportando
-        ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0',
+        ip: incomingIp,
+        city: existing.city || '',
+        region: existing.region || '',
+        isp: existing.isp || '',
         updatedAt: new Date(now).toISOString()
     };
 
     global.devices[deviceId] = devData;
     persistDevice(deviceId, devData);
+
+    // Si la IP cambió o no tenemos geolocalización guardada, actualizamos en background
+    const ipChanged = incomingIp !== existing.ip;
+    const hasLocation = existing.city && existing.isp;
+    if (incomingIp && incomingIp !== '0.0.0.0' && incomingIp !== '127.0.0.1' && (ipChanged || !hasLocation)) {
+        updateDeviceLocation(deviceId, incomingIp).catch(() => {});
+    }
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
 
@@ -984,7 +1036,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 const btns = [];
                 myDevs.forEach(d => {
                     const on = (now - d.lastSeen) < 300000;
-                    txt += `• <b>${d.alias || d.deviceId}</b>: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
+                    const geoSuffix = (d.city && d.isp) ? ` <i>(${d.city} — ${d.isp})</i>` : '';
+                    txt += `• <b>${d.alias || d.deviceId}</b>${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
                     btns.push([{ text: `📍 ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }]);
                 });
                 btns.push([{ text: '✏️ Cambiar Nombre', callback_data: '/renombrar' }]);
