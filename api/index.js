@@ -355,6 +355,51 @@ function buildWeeklyReport(device, targetChatId = '') {
            `🔗 <b>Ver Monitor Web:</b>\n${getWebUrl(device.deviceId, targetChatId || device.chatId)}`;
 }
 
+// 5.1 HELPER: CONSTRUIR REPORTE DIARIO
+function buildDailyReport(device, targetChatId = '') {
+    if (!device) return null;
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const history = device.history || [];
+
+    // Filtrar eventos de las últimas 24 horas
+    const dayEvents = history.filter(h => (h.start && h.start >= oneDayAgo) || (h.end && h.end >= oneDayAgo));
+
+    let totalBlackoutMs = 0;
+    const eventsSummary = [];
+
+    dayEvents.forEach(e => {
+        const dur = e.durationMs || (e.end ? (e.end - e.start) : 0);
+        const type = e.type || 'power_outage';
+        
+        if (type === 'power_outage') {
+            totalBlackoutMs += dur;
+            eventsSummary.push(`• 🔴 <b>Corte de Luz</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+        } else if (type === 'internet_drop') {
+            eventsSummary.push(`• 🌐 <b>Caída de Internet</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+        } else if (type === 'fluctuation') {
+            eventsSummary.push(`• 〽️ <b>Fluctuación / Bajón</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+        }
+    });
+
+    const totalDayMs = 24 * 60 * 60 * 1000;
+    const stabilityPct = Math.max(0, Math.min(100, (((totalDayMs - totalBlackoutMs) / totalDayMs) * 100).toFixed(1)));
+
+    let statusLine = '';
+    if (eventsSummary.length === 0) {
+        statusLine = `✨ ¡Excelente! El servicio eléctrico y de internet estuvo 100% estable todo el día.`;
+    } else {
+        statusLine = `📊 <b>Desglose de hoy:</b>\n` + eventsSummary.join('\n');
+    }
+
+    return `📊 <b>REPORTE DIARIO DE ESTABILIDAD</b> 🔌\n` +
+           `📅 <i>Últimas 24 horas</i>\n\n` +
+           `📍 <b>Ubicación:</b> <b>${device.alias || device.deviceId}</b>\n` +
+           `⚡ <b>Estabilidad de luz hoy:</b> <code>${stabilityPct}%</code>\n\n` +
+           `${statusLine}\n\n` +
+           `🔗 <b>Ver Monitor Web:</b> ${getWebUrl(device.deviceId, targetChatId || device.chatId)}`;
+}
+
 // Helper: construir mensaje de estado de un dispositivo
 function buildStatusMsg(dev, devId, targetChatId = '') {
     if (!dev) return `⚠️ <b>Dispositivo no encontrado:</b> <code>${devId || 'ESP-DESCONOCIDO'}</code>`;
@@ -1275,6 +1320,42 @@ app.get('/api/cron-weekly-report', async (req, res) => {
     }
 
     return res.json({ success: true, message: `Reporte semanal procesado. Enviado a ${sentCount} dispositivos.` });
+});
+
+// 5.2 ENDPOINT CRON JOB PARA REPORTE DIARIO DE ESTABILIDAD (TODAS LAS NOCHES A LAS 9:00 PM VET / 1:00 AM UTC)
+app.get('/api/cron-daily-report', async (req, res) => {
+    loadFromDisk();
+    const combined = { ...global.persistentStore, ...global.devices };
+    let sentCount = 0;
+    const now = Date.now();
+
+    for (const dev of Object.values(combined)) {
+        if (!dev || !dev.deviceId) continue;
+        let devChatId = (dev.chatId || '').toString().trim();
+        if (devChatId === '3307499449') devChatId = '330749449';
+
+        // GUARDIA: Si ya se envió en las últimas 12 horas, omitir
+        if (dev.lastDailyReportSentAt && (now - dev.lastDailyReportSentAt < 12 * 60 * 60 * 1000)) {
+            console.log(`[DAILY-REPORT] Reporte diario ya enviado recientemente a ${dev.deviceId}. Omitiendo.`);
+            continue;
+        }
+
+        if (devChatId) {
+            const reportMsg = buildDailyReport(dev, devChatId);
+            if (reportMsg) {
+                await sendTelegramMessage(devChatId, reportMsg);
+                dev.lastDailyReportSentAt = now;
+                persistDevice(dev.deviceId, dev);
+                sentCount++;
+            }
+        }
+    }
+
+    if (sentCount > 0) {
+        await saveToCloud();
+    }
+
+    return res.json({ success: true, message: `Reporte diario procesado. Enviado a ${sentCount} dispositivos.` });
 });
 
 // ENDPOINT ENRIQUECIDO PARA PANEL MULTI-DISPOSITIVOS (rápido, sin bloqueo y filtrado por seguridad)
