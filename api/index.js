@@ -531,8 +531,8 @@ async function checkBlackoutAlerts() {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado 300 segundos sin señal (5 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
-        if (elapsedMs >= 300000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado 480 segundos sin señal (8 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
+        if (elapsedMs >= 480000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
@@ -744,9 +744,9 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         }
 
-        // Solo enviar notificaciones de regreso a Telegram si el corte duró 5 minutos o más (300000 ms)
+        // Solo enviar notificaciones de regreso a Telegram si el corte duró 8 minutos o más (480000 ms)
         // Esto evita recibir una alerta de "Servicio Restablecido" si nunca te avisó de la desconexión
-        if (targetChatId && durationMs >= 300000) {
+        if (targetChatId && durationMs >= 480000) {
             console.log(`[NOTIF REGRESO] Enviando aviso a Telegram para ${deviceId} a chatId ${targetChatId}`);
             await sendTelegramMessage(targetChatId, returnMsg);
 
@@ -1035,7 +1035,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 let txt = `🏠 <b>TUS MONITORES (${myDevs.length}):</b>\n\n`;
                 const btns = [];
                 myDevs.forEach(d => {
-                    const on = (now - d.lastSeen) < 300000;
+                    const on = (now - d.lastSeen) < 480000;
                     const geoSuffix = (d.city && d.isp) ? ` <i>(${d.city} — ${d.isp})</i>` : '';
                     txt += `• <b>${d.alias || d.deviceId}</b>${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
                     btns.push([{ text: `📍 ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }]);
@@ -1420,7 +1420,7 @@ app.get('/api/devices-list', (req, res) => {
         }
         const combined = { ...global.persistentStore, ...global.devices };
         const now = Date.now();
-        const OFFLINE_THRESHOLD_MS = 300000;
+        const OFFLINE_THRESHOLD_MS = 480000;
         
         let reqChatId = String(req.query.chatId || '').trim();
         // Corrección de bug conocido de Telegram ID para Franklin
@@ -1519,7 +1519,7 @@ app.get('/api/status/:id', async (req, res) => {
     // Comprobar si este dispositivo específico está online (menos de 300s / 5 min desde el último reporte)
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 300000;
+    const isOnline = elapsedMs < 480000;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
