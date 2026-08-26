@@ -182,8 +182,7 @@ function sendTelegramMessage(chatId, text, customButtons = null) {
         try {
             const buttons = customButtons || [
                 [{ text: "📊 Consultar Estado en Vivo", callback_data: "/estado" }],
-                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }],
-                [{ text: "🌤️ Clima en tu Zona", callback_data: "/clima" }]
+                [{ text: "📜 Ver Historial de Cortes", callback_data: "/historial" }]
             ];
 
             const payload = JSON.stringify({
@@ -1076,16 +1075,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     ]
                 );
             }
-
-        } else if (text.includes('/clima') || text.includes('clima') || text.includes('tiempo')) {
-            const myDevs = getMyDevs();
-            const myDev = myDevs.length > 0 ? myDevs[0] : null;
-            const now = Date.now();
-            const on = myDev ? ((now - myDev.lastSeen) < 240000) : false;
-            await sendTelegramMessage(chatId,
-                `🌤️ <b>CLIMA — Maracay, Aragua</b>\n\n🌡️ <b>Temperatura:</b> 26 °C\n☁️ <b>Cielo:</b> ⛅ Parcialmente Nublado\n💨 <b>Viento:</b> 10 km/h\n\n⚡ <b>Estado Eléctrico:</b> ${on ? 'HAY LUZ 🟢' : 'SIN LUZ 🔴'}`,
-                [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
-            );
 
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const myDevs = getMyDevs();
