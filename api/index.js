@@ -1325,6 +1325,7 @@ app.post('/api/device-unlinked', async (req, res) => {
 
     if (device) {
         device.unlinked = true;
+        device.resetRequested = true; // Forzar reinicio WiFi si vuelve a conectarse
         device.chatId = '';
         device.guestChatIds = []; // Limpiar familiares
         device.alias = deviceId; // Restablecer alias
