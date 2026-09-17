@@ -175,6 +175,7 @@ async function loadFromCloud() {
             const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
             if (cloudStore && typeof cloudStore === 'object') {
                 Object.keys(cloudStore).forEach(id => {
+                    if (cloudStore[id] && cloudStore[id].unlinked) return;
                     const aliasName = global.aliases[id] || cloudStore[id].alias || id;
                     global.persistentStore[id] = {
                         ...(global.persistentStore[id] || {}),
@@ -206,6 +207,15 @@ function persistDevice(deviceId, data) {
 
 function getDevice(deviceId) {
     return global.persistentStore[deviceId] || global.devices[deviceId] || null;
+}
+
+function getGuestName(dev, gId, index) {
+    if (!dev) return `Familiar ${index != null ? index + 1 : ''}`.trim();
+    const idStr = String(gId).trim();
+    if (dev.guestNames && dev.guestNames[idStr] && dev.guestNames[idStr].trim().length > 0) {
+        return dev.guestNames[idStr].trim();
+    }
+    return `Familiar ${index != null ? index + 1 : 1}`;
 }
 
 // Función para enviar mensajes de Telegram garantizada (Promise awaitable para serverless)
@@ -297,14 +307,14 @@ function setupTelegramCommands() {
     try {
         const commandsPayload = JSON.stringify({
             commands: [
-                { command: "estado", description: "📊 Ver si hay luz en tiempo real" },
-                { command: "invitar", description: "👥 Agregar o gestionar familiares" },
-                { command: "renombrar", description: "✏️ Asignar o Renombrar Casas" },
-                { command: "casas", description: "🏠 Mis Casas / Monitores" },
-                { command: "reporte", description: "📈 Reporte semanal de estabilidad" },
-                { command: "historial", description: "📜 Ver lista y duración de cortes" },
-                { command: "chatid", description: "🆔 Ver mi Chat ID de Telegram" },
-                { command: "reiniciar", description: "🔄 Reiniciar WiFi de la placa" }
+                { command: "estado", description: "Ver si hay luz en tiempo real" },
+                { command: "invitar", description: "Agregar o gestionar familiares" },
+                { command: "renombrar", description: "Asignar o Renombrar Casas" },
+                { command: "casas", description: "Mis Casas / Monitores" },
+                { command: "reporte", description: "Reporte semanal de estabilidad" },
+                { command: "historial", description: "Ver lista y duración de cortes" },
+                { command: "chatid", description: "Ver mi Chat ID" },
+                { command: "reiniciar", description: "Reiniciar WiFi de la placa" }
             ]
         });
 
@@ -339,15 +349,26 @@ function buildWeeklyReport(device, targetChatId = '') {
     const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
     const history = device.history || [];
 
-    const weekEvents = history.filter(h => (h.start && h.start >= oneWeekAgo) || (h.end && h.end >= oneWeekAgo));
+    const weekEvents = history.filter(h => (h.start && h.start >= oneWeekAgo) || (h.end && h.end >= oneWeekAgo) || (!h.end && h.start));
 
     let totalBlackoutMs = 0;
     let longCutsCount = 0;
     let microCutsCount = 0;
     let longestCutMs = 0;
+    let hasCutInProgress = false;
 
     weekEvents.forEach(e => {
-        const dur = e.durationMs || (e.end ? (e.end - e.start) : 0);
+        const isOngoing = !e.end;
+        let dur = 0;
+        if (isOngoing) {
+            hasCutInProgress = true;
+            const eventStart = Math.max(e.start || now, oneWeekAgo);
+            dur = Math.max(0, now - eventStart);
+        } else {
+            const eventStart = Math.max(e.start || oneWeekAgo, oneWeekAgo);
+            const eventEnd = Math.min(e.end || now, now);
+            dur = Math.max(0, eventEnd - eventStart);
+        }
         totalBlackoutMs += dur;
         if (dur >= 300000) {
             longCutsCount++;
@@ -359,11 +380,13 @@ function buildWeeklyReport(device, targetChatId = '') {
 
     const totalWeekMs = 7 * 24 * 60 * 60 * 1000;
     const blackoutHours = (totalBlackoutMs / 3600000).toFixed(1);
-    const lightHours = ((totalWeekMs - totalBlackoutMs) / 3600000).toFixed(1);
-    const stabilityPct = Math.max(0, Math.min(100, ((totalWeekMs - totalBlackoutMs) / totalWeekMs * 100).toFixed(1)));
+    const lightHours = (Math.max(0, totalWeekMs - totalBlackoutMs) / 3600000).toFixed(1);
+    const stabilityPct = Math.max(0, Math.min(100, ((totalWeekMs - totalBlackoutMs) / totalWeekMs * 100))).toFixed(1);
 
     let diagnostic = "🌟 <b>Excelente:</b> Suministro eléctrico continuo sin cortes significativos.";
-    if (stabilityPct < 80) {
+    if (hasCutInProgress) {
+        diagnostic = "🚨 <b>Atención:</b> Actualmente hay un corte de energía en curso.";
+    } else if (stabilityPct < 80) {
         diagnostic = "🚨 <b>Crítico:</b> Frecuencia severa de cortes eléctricos esta semana.";
     } else if (stabilityPct < 95) {
         diagnostic = "⚠️ <b>Inestable:</b> Se registraron varias interrupciones en el servicio.";
@@ -395,40 +418,63 @@ function buildDailyReport(device, targetChatId = '') {
     const oneDayAgo = now - 24 * 60 * 60 * 1000;
     const history = device.history || [];
 
-    // Filtrar eventos de las últimas 24 horas
-    const dayEvents = history.filter(h => (h.start && h.start >= oneDayAgo) || (h.end && h.end >= oneDayAgo));
+    // Filtrar eventos de las últimas 24 horas (incluyendo eventos activos sin fecha de fin)
+    const dayEvents = history.filter(h => (h.start && h.start >= oneDayAgo) || (h.end && h.end >= oneDayAgo) || (!h.end && h.start));
 
     let totalBlackoutMs = 0;
+    let hasCutInProgress = false;
+    let inProgressDurationStr = '';
     const eventsSummary = [];
 
     dayEvents.forEach(e => {
-        const dur = e.durationMs || (e.end ? (e.end - e.start) : 0);
-        const type = e.type || 'power_outage';
+        const isOngoing = !e.end;
+        let dur = 0;
+        let durStr = e.durationStr || 'N/A';
+
+        if (isOngoing) {
+            hasCutInProgress = true;
+            const eventStart = Math.max(e.start || now, oneDayAgo);
+            dur = Math.max(0, now - eventStart);
+            const durHrs = Math.floor(dur / 3600000);
+            const durMins = Math.floor((dur % 3600000) / 60000);
+            durStr = durHrs > 0 ? `${durHrs}h ${durMins}m (En curso 🔴)` : `${durMins}m (En curso 🔴)`;
+            inProgressDurationStr = durStr;
+        } else {
+            const eventStart = Math.max(e.start || oneDayAgo, oneDayAgo);
+            const eventEnd = Math.min(e.end || now, now);
+            dur = Math.max(0, eventEnd - eventStart);
+        }
         
+        const type = e.type || 'power_outage';
         if (type === 'power_outage') {
             totalBlackoutMs += dur;
-            eventsSummary.push(`• 🔴 <b>Corte de Luz</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+            eventsSummary.push(`• 🔴 <b>Corte de Luz</b> a las ${e.startTimeStr || ''} (duró ${durStr})`);
         } else if (type === 'internet_drop') {
-            eventsSummary.push(`• 🌐 <b>Caída de Internet</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+            eventsSummary.push(`• 🌐 <b>Caída de Internet</b> a las ${e.startTimeStr || ''} (duró ${durStr})`);
         } else if (type === 'fluctuation') {
-            eventsSummary.push(`• 〽️ <b>Fluctuación / Bajón</b> a las ${e.startTimeStr || ''} (duró ${e.durationStr || 'N/A'})`);
+            eventsSummary.push(`• 〽️ <b>Fluctuación / Bajón</b> a las ${e.startTimeStr || ''} (duró ${durStr})`);
         }
     });
 
     const totalDayMs = 24 * 60 * 60 * 1000;
-    const stabilityPct = Math.max(0, Math.min(100, (((totalDayMs - totalBlackoutMs) / totalDayMs) * 100).toFixed(1)));
+    const stabilityPctNum = Math.max(0, Math.min(100, ((totalDayMs - totalBlackoutMs) / totalDayMs) * 100));
+    const stabilityPct = stabilityPctNum.toFixed(1);
 
     let statusLine = '';
-    if (eventsSummary.length === 0) {
+    if (eventsSummary.length === 0 && !hasCutInProgress) {
         statusLine = `✨ ¡Excelente! El servicio eléctrico y de internet estuvo 100% estable todo el día.`;
     } else {
         statusLine = `📊 <b>Desglose de hoy:</b>\n` + eventsSummary.join('\n');
     }
 
+    const stabilityBadge = hasCutInProgress ? 
+        `<code>${stabilityPct}%</code> 🔴 <i>(Corte activo: ${inProgressDurationStr})</i>` : 
+        `<code>${stabilityPct}%</code>`;
+
     return `📊 <b>REPORTE DIARIO DE ESTABILIDAD</b> 🔌\n` +
            `📅 <i>Últimas 24 horas</i>\n\n` +
            `📍 <b>Ubicación:</b> <b>${device.alias || device.deviceId}</b>\n` +
-           `⚡ <b>Estabilidad de luz hoy:</b> <code>${stabilityPct}%</code>\n\n` +
+           `⚡ <b>Estabilidad de luz hoy:</b> ${stabilityBadge}\n\n` +
            `${statusLine}\n\n` +
            `🔗 <b>Ver Monitor Web:</b> ${getWebUrl(device.deviceId, targetChatId || device.chatId)}`;
 }
@@ -440,7 +486,8 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const lastSeen = dev.lastSeen || now;
     const elapsed = now - lastSeen;
     const online = elapsed < 240000;
-    const name = dev.alias || dev.deviceId || devId;
+    const roleSuffix = targetChatId ? ` (${checkIsOwner(dev, targetChatId) ? 'Propietario' : 'Invitado'})` : '';
+    const name = `${dev.alias || dev.deviceId || devId}${roleSuffix}`;
     const activeDevId = dev.deviceId || devId;
     const webLink = getWebUrl(activeDevId, targetChatId || dev.chatId);
 
@@ -533,8 +580,8 @@ async function checkBlackoutAlerts() {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado 480 segundos sin señal (8 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
-        if (elapsedMs >= 480000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado 480 segundos sin señal (5 minutos de gracia sólida anti-falsos positivos) y no se ha notificado la ida de luz
+        if (elapsedMs >= 300000 && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
             dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
@@ -599,9 +646,7 @@ async function checkBlackoutAlerts() {
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', async (req, res) => {
-    if (!isCloudLoaded) {
-        await loadFromCloud();
-    }
+    await loadFromCloud();
     loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
@@ -613,6 +658,7 @@ app.post('/api/ping', async (req, res) => {
 
     const now = Date.now();
 
+    await checkBlackoutAlerts();
     const existing = getDevice(deviceId) || {};
     const shouldReset = existing.resetRequested || false;
     const wasBlackout = existing.blackoutNotified || false;
@@ -633,6 +679,7 @@ app.post('/api/ping', async (req, res) => {
     if (shouldReset) {
         targetChatId = ''; // Eliminar la relación del Chat ID propietario
         existing.guestChatIds = []; // Eliminar todos los familiares
+        existing.guestNames = {};
         deviceAlias = deviceId; // Eliminar el alias del dispositivo
         if (global.aliases[deviceId]) delete global.aliases[deviceId];
         isUnlinkedNow = true;
@@ -700,10 +747,15 @@ app.post('/api/ping', async (req, res) => {
         // 1. ¿El chip se mantuvo encendido todo el tiempo? (Uptime mayor que el corte o pings offline acumulados)
         // -> En la casa NUNCA se fue la luz, fue exclusivamente CAÍDA DE SERVICIO DE INTERNET (CANTV/Fibra)
         const isOnlyInternetDrop = (boardUptimeMs > (durationMs + 5000)) || (offlinePings > 0);
+        const isVercelLatency = req.body.vercelDrop === true && req.body.realDrop !== true;
         
         let eventType = 'power_outage';
         if (isOnlyInternetDrop) {
-            eventType = 'internet_drop';
+            if (isVercelLatency) {
+                eventType = 'vercel_latency';
+            } else {
+                eventType = 'internet_drop';
+            }
         } else if (totalMins < 5) {
             eventType = 'fluctuation';
         } else {
@@ -748,6 +800,17 @@ app.post('/api/ping', async (req, res) => {
                         `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o una micro-caída de internet en tu casa.</i>\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
+        } else if (eventType === 'vercel_latency') {
+            alertMsg = `☁️ <b>Falsa Alarma (Latencia)</b>\n` +
+                       `⏰ <b>Hora de resolución:</b> ${returnTimeStr}\n\n` +
+                       `El internet y la luz siempre estuvieron bien. Hubo un retraso temporal de los servidores en la nube de Vercel.\n\n` +
+                       `⏳ <b>Duración del retraso:</b> ${durationFormatted}\n` +
+                       `📱 <b>Dispositivo:</b> ${deviceAlias}\n` +
+                       `🔗 <b>Monitor:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
+            // Remover del historial para que no ensucie la web de cortes reales
+            if (history.length > 0 && history[0].type === 'vercel_latency') {
+                history.shift();
+            }
         } else if (eventType === 'internet_drop') {
             returnMsg = `🌐 <b>¡SERVICIO DE INTERNET RESTABLECIDO!</b>\n\n` +
                         `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
@@ -766,9 +829,9 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         }
 
-        // Solo enviar notificaciones de regreso a Telegram si el corte duró 8 minutos o más (480000 ms)
+        // Solo enviar notificaciones de regreso a Telegram si el corte duró 5 minutos o más (480000 ms)
         // Esto evita recibir una alerta de "Servicio Restablecido" si nunca te avisó de la desconexión
-        if (targetChatId && durationMs >= 480000) {
+        if (targetChatId && durationMs >= 300000) {
             console.log(`[NOTIF REGRESO] Enviando aviso a Telegram para ${deviceId} a chatId ${targetChatId}`);
             await sendTelegramMessage(targetChatId, returnMsg);
 
@@ -793,6 +856,7 @@ app.post('/api/ping', async (req, res) => {
         onlineSince: onlineSince,
         chatId: targetChatId,
         guestChatIds: existing.guestChatIds || [],
+        guestNames: existing.guestNames || {},
         blackoutNotified: false, // Resetear bandera al volver la luz
         blackoutStartTime: null,
         history: history,
@@ -817,6 +881,7 @@ app.post('/api/ping', async (req, res) => {
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
 
+    await saveToCloud();
     await checkBlackoutAlerts();
 
     return res.json({ 
@@ -831,9 +896,7 @@ app.post('/api/ping', async (req, res) => {
 
 // 2. ENDPOINT WEBHOOK TELEGRAM — CORRECTO: procesar y enviar respuesta PRIMERO, luego 200 OK
 app.post('/api/telegram-webhook', async (req, res) => {
-    if (!isCloudLoaded) {
-        await loadFromCloud();
-    }
+    await loadFromCloud();
     try {
         const update = req.body;
         if (!update) return res.status(200).send('OK');
@@ -865,25 +928,68 @@ app.post('/api/telegram-webhook', async (req, res) => {
         const store = global.persistentStore;
         const devs = Object.values(store);
 
-        // --- PENDIENTE: Agregar Familiar ---
+        // --- PENDIENTE: Agregar Familiar (Paso 1: Chat ID numérico) ---
         global.pendingGuestAddForChat = global.pendingGuestAddForChat || {};
+        global.pendingGuestNameForChat = global.pendingGuestNameForChat || {};
         const guestDevId = global.pendingGuestAddForChat[chatId];
         if (guestDevId && /^\d+$/.test(cleanText)) {
             delete global.pendingGuestAddForChat[chatId];
             const existingDev = getDevice(guestDevId) || { deviceId: guestDevId };
             existingDev.guestChatIds = existingDev.guestChatIds || [];
+            existingDev.guestNames = existingDev.guestNames || {};
             if (!existingDev.guestChatIds.includes(cleanText)) existingDev.guestChatIds.push(cleanText);
             persistDevice(guestDevId, existingDev);
             await saveToCloud();
+
+            // Configurar paso 2: solicitar el nombre o alias del familiar
+            global.pendingGuestNameForChat[chatId] = { devId: guestDevId, guestId: cleanText, isNew: true };
+
             await sendTelegramMessage(chatId,
-                `✅ <b>¡Familiar agregado!</b>\n\n👥 <b>Chat ID:</b> <code>${cleanText}</code>\n📍 <b>Monitor:</b> <b>${existingDev.alias || guestDevId}</b>\n\nAhora recibirá todas las alertas.`,
-                [[{ text: '👥 Ver Familiares', callback_data: '/invitar' }],
-                 [{ text: '📊 Ver Estado', callback_data: `/estado_${guestDevId}` }]]
+                `✅ <b>Chat ID registrado:</b> <code>${cleanText}</code>\n📍 <b>Monitor:</b> <b>${existingDev.alias || guestDevId}</b>\n\n` +
+                `🏷️ <b>¿Cómo se llama este familiar?</b>\n` +
+                `Escribe su nombre o parentesco (ej: <i>Mamá, Pedro, Esposa, Tío Carlos</i>):`,
+                [[{ text: '⏭️ Omitir (dejar sin nombre)', callback_data: `/skip_guest_name_${guestDevId}_${cleanText}` }]]
             );
-            sendTelegramMessage(cleanText,
-                `🎉 <b>¡Fuiste agregado como Familiar Autorizado!</b>\n\nAhora recibirás alertas de <b>${existingDev.alias || guestDevId}</b>.`,
-                [[{ text: '📊 Ver Estado', callback_data: `/estado_${guestDevId}` }]]
-            ).catch(() => {});
+            return res.status(200).send('OK');
+        }
+
+        // --- PENDIENTE: Asignar o Editar Nombre de Familiar (Paso 2 o desde Renombrar) ---
+        const pendingNameInfo = global.pendingGuestNameForChat[chatId];
+        if (pendingNameInfo && cleanText.length > 0 && !cleanText.startsWith('/')) {
+            const { devId: gDevId, guestId: gGuestId, isNew } = pendingNameInfo;
+            delete global.pendingGuestNameForChat[chatId];
+            const existingDev = getDevice(gDevId) || { deviceId: gDevId };
+            existingDev.guestNames = existingDev.guestNames || {};
+            existingDev.guestNames[gGuestId] = cleanText;
+            persistDevice(gDevId, existingDev);
+            await saveToCloud();
+
+            const devName = existingDev.alias || gDevId;
+            if (isNew) {
+                await sendTelegramMessage(chatId,
+                    `✅ <b>¡Familiar agregado con éxito!</b>\n\n` +
+                    `👤 <b>Nombre:</b> <b>${cleanText}</b>\n` +
+                    `👥 <b>Chat ID:</b> <code>${gGuestId}</code>\n` +
+                    `📍 <b>Monitor:</b> <b>${devName}</b>\n\n` +
+                    `Ahora recibirá todas las alertas de cortes y restablecimiento de luz.`,
+                    [[{ text: '👥 Ver Familiares', callback_data: '/invitar' }],
+                     [{ text: '📊 Ver Estado', callback_data: `/estado_${gDevId}` }]]
+                );
+                sendTelegramMessage(gGuestId,
+                    `🎉 <b>¡Fuiste agregado como Familiar Autorizado (${cleanText})!</b>\n\n` +
+                    `Ahora recibirás alertas de luz del monitor <b>${devName}</b>.`,
+                    [[{ text: '📊 Ver Estado', callback_data: `/estado_${gDevId}` }]]
+                ).catch(() => {});
+            } else {
+                await sendTelegramMessage(chatId,
+                    `✅ <b>¡Nombre de familiar actualizado con éxito!</b>\n\n` +
+                    `👤 <b>Nuevo nombre:</b> <b>${cleanText}</b>\n` +
+                    `👥 <b>Chat ID:</b> <code>${gGuestId}</code>\n` +
+                    `📍 <b>Monitor:</b> <b>${devName}</b>`,
+                    [[{ text: '👥 Gestión de Familiares', callback_data: '/invitar' }],
+                     [{ text: '📊 Ver Estado', callback_data: `/estado_${gDevId}` }]]
+                );
+            }
             return res.status(200).send('OK');
         }
 
@@ -933,12 +1039,18 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const dev = getDevice(devId);
 
             if (dev && targetGuestId) {
+                const idx = (dev.guestChatIds || []).findIndex(g => String(g).trim() === targetGuestId);
+                const guestName = getGuestName(dev, targetGuestId, idx >= 0 ? idx : 0);
                 dev.guestChatIds = (dev.guestChatIds || []).filter(g => String(g).trim() !== targetGuestId);
+                if (dev.guestNames) {
+                    delete dev.guestNames[targetGuestId];
+                }
                 persistDevice(devId, dev);
                 await saveToCloud();
 
                 await sendTelegramMessage(chatId,
                     `✅ <b>Familiar eliminado con éxito:</b>\n\n` +
+                    `👤 <b>Familiar:</b> <b>${guestName}</b>\n` +
                     `👥 <b>Chat ID:</b> <code>${targetGuestId}</code>\n` +
                     `📍 <b>Monitor:</b> <b>${dev.alias || devId}</b>\n\n` +
                     `Este familiar ya no recibirá alertas de luz ni tendrá acceso al monitor.`,
@@ -962,6 +1074,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             if (dev) {
                 const prevGuests = [...(dev.guestChatIds || [])];
                 dev.guestChatIds = [];
+                dev.guestNames = {};
                 persistDevice(devId, dev);
                 await saveToCloud();
 
@@ -1004,8 +1117,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
                 const buttons = [];
                 guests.forEach((gId, index) => {
-                    listMsg += `• <b>Familiar ${index + 1}:</b> Chat ID <code>${gId}</code>\n`;
-                    buttons.push([{ text: `❌ Quitar Familiar ${index + 1} (${gId})`, callback_data: `/delguest_${dev.deviceId}_${gId}` }]);
+                    const gName = getGuestName(dev, gId, index);
+                    listMsg += `• 👤 <b>${gName}</b> — Chat ID <code>${gId}</code>\n`;
+                    buttons.push([{ text: `❌ Quitar ${gName} (${gId})`, callback_data: `/delguest_${dev.deviceId}_${gId}` }]);
                 });
 
                 if (guests.length > 1) {
@@ -1015,6 +1129,80 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
                 await sendTelegramMessage(chatId, listMsg, buttons);
             }
+
+        } else if (text.startsWith('/editarguest_')) {
+            // MENÚ INTERACTIVO: SELECCIONAR QUÉ FAMILIAR RENOMBRAR / EDITAR
+            const devId = text.replace('/editarguest_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
+
+            if (!dev || (dev.guestChatIds || []).length === 0) {
+                await sendTelegramMessage(chatId,
+                    `ℹ️ <b>No hay familiares registrados en <code>${dev ? (dev.alias || devId) : devId}</code>.</b>`,
+                    [[{ text: '👥 Gestión de Familiares', callback_data: '/invitar' }]]
+                );
+            } else {
+                const guests = dev.guestChatIds;
+                const devName = dev.alias || devId;
+
+                let listMsg = `✏️ <b>EDITAR NOMBRE DE FAMILIAR — ${devName}</b>\n\n` +
+                              `Selecciona el familiar al que deseas cambiarle el nombre:\n\n`;
+
+                const buttons = [];
+                guests.forEach((gId, index) => {
+                    const gName = getGuestName(dev, gId, index);
+                    listMsg += `• 👤 <b>${gName}</b> (Chat ID: <code>${gId}</code>)\n`;
+                    buttons.push([{ text: `✏️ Renombrar "${gName}"`, callback_data: `/pedirnombreguest_${dev.deviceId}_${gId}` }]);
+                });
+                buttons.push([{ text: `🔙 Volver`, callback_data: '/invitar' }]);
+
+                await sendTelegramMessage(chatId, listMsg, buttons);
+            }
+
+        } else if (text.startsWith('/pedirnombreguest_')) {
+            // SOLICITAR EL NUEVO NOMBRE PARA UN FAMILIAR ESPECÍFICO
+            const parts = text.replace('/pedirnombreguest_', '').split('_');
+            const devId = (parts[0] || '').toUpperCase().trim();
+            const targetGuestId = (parts[1] || '').trim();
+            const dev = getDevice(devId);
+
+            if (!dev) {
+                await sendTelegramMessage(chatId, `⚠️ Monitor no encontrado.`, [[{ text: '👥 Familiares', callback_data: '/invitar' }]]);
+            } else {
+                const idx = (dev.guestChatIds || []).findIndex(g => String(g).trim() === targetGuestId);
+                const currentName = getGuestName(dev, targetGuestId, idx >= 0 ? idx : 0);
+                global.pendingGuestNameForChat = global.pendingGuestNameForChat || {};
+                global.pendingGuestNameForChat[chatId] = { devId, guestId: targetGuestId, isNew: false };
+                await sendTelegramMessage(chatId,
+                    `✏️ <b>Cambiando nombre a familiar:</b>\n\n` +
+                    `👤 <b>Nombre actual:</b> <b>${currentName}</b>\n` +
+                    `👥 <b>Chat ID:</b> <code>${targetGuestId}</code>\n` +
+                    `📍 <b>Monitor:</b> <b>${dev.alias || devId}</b>\n\n` +
+                    `👉 <b>Escribe el nuevo nombre o parentesco</b> (ej: <i>Mamá, Papá, Esposa, Pedro, Tío Carlos</i>):`,
+                    [[{ text: '❌ Cancelar', callback_data: '/invitar' }]]
+                );
+            }
+
+        } else if (text.startsWith('/skip_guest_name_')) {
+            // OMITIR ASIGNAR NOMBRE AL REGISTRAR FAMILIAR
+            const parts = text.replace('/skip_guest_name_', '').split('_');
+            const devId = (parts[0] || '').toUpperCase().trim();
+            const guestId = (parts[1] || '').trim();
+            if (global.pendingGuestNameForChat) delete global.pendingGuestNameForChat[chatId];
+            const dev = getDevice(devId);
+
+            await sendTelegramMessage(chatId,
+                `✅ <b>¡Familiar agregado!</b>\n\n` +
+                `👥 <b>Chat ID:</b> <code>${guestId}</code>\n` +
+                `📍 <b>Monitor:</b> <b>${dev ? (dev.alias || devId) : devId}</b>\n\n` +
+                `Ahora recibirá todas las alertas. Puedes asignarle un nombre en cualquier momento desde Gestión de Familiares.`,
+                [[{ text: '👥 Ver Familiares', callback_data: '/invitar' }],
+                 [{ text: '📊 Ver Estado', callback_data: `/estado_${devId}` }]]
+            );
+            sendTelegramMessage(guestId,
+                `🎉 <b>¡Fuiste agregado como Familiar Autorizado!</b>\n\n` +
+                `Ahora recibirás alertas del monitor <b>${dev ? (dev.alias || devId) : devId}</b>.`,
+                [[{ text: '📊 Ver Estado', callback_data: `/estado_${devId}` }]]
+            ).catch(() => {});
 
         } else if (text.startsWith('/pedirnombre_')) {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
@@ -1042,7 +1230,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `🏠 <b>¿Cuál monitor deseas consultar?</b>`,
                     myDevs.map(d => {
                         const on = (now - d.lastSeen) < 240000;
-                        return [{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }];
+                        const roleTag = checkIsOwner(d, chatId) ? '(Propietario)' : '(Invitado)';
+                        return [{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId} ${roleTag}`, callback_data: `/estado_${d.deviceId}` }];
                     })
                 );
             } else {
@@ -1063,8 +1252,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 myDevs.forEach(d => {
                     const on = (now - d.lastSeen) < 480000;
                     const geoSuffix = (d.city && d.isp) ? ` <i>(${d.city} — ${d.isp})</i>` : '';
-                    txt += `• <b>${d.alias || d.deviceId}</b>${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
-                    btns.push([{ text: `📍 ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }]);
+                    const roleTag = checkIsOwner(d, chatId) ? '(Propietario)' : '(Invitado)';
+                    txt += `• <b>${d.alias || d.deviceId}</b> ${roleTag}${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
+                    btns.push([{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId} ${roleTag}`, callback_data: `/estado_${d.deviceId}` }]);
                 });
                 btns.push([{ text: '✏️ Cambiar Nombre', callback_data: '/renombrar' }]);
                 await sendTelegramMessage(chatId, txt, btns);
@@ -1085,7 +1275,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else if (myDevs.length > 1) {
                 await sendTelegramMessage(chatId, `📜 <b>¿De cuál monitor deseas ver el historial de cortes?</b>`,
-                    myDevs.map(d => [{ text: `📜 ${d.alias || d.deviceId}`, callback_data: `/historial_${d.deviceId}` }])
+                    myDevs.map(d => {
+                        const roleTag = checkIsOwner(d, chatId) ? '(Propietario)' : '(Invitado)';
+                        return [{ text: `📜 ${d.alias || d.deviceId} ${roleTag}`, callback_data: `/historial_${d.deviceId}` }];
+                    })
                 );
             } else {
                 await sendTelegramMessage(chatId, buildHistoryMsg(myDevs[0], chatId), [
@@ -1109,7 +1302,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else if (myDevs.length > 1) {
                 await sendTelegramMessage(chatId, `📈 <b>¿De cuál monitor deseas generar el reporte semanal?</b>`,
-                    myDevs.map(d => [{ text: `📈 ${d.alias || d.deviceId}`, callback_data: `/reporte_${d.deviceId}` }])
+                    myDevs.map(d => {
+                        const roleTag = checkIsOwner(d, chatId) ? '(Propietario)' : '(Invitado)';
+                        return [{ text: `📈 ${d.alias || d.deviceId} ${roleTag}`, callback_data: `/reporte_${d.deviceId}` }];
+                    })
                 );
             } else {
                 await sendTelegramMessage(chatId, buildWeeklyReport(myDevs[0], chatId) || '⚠️ Sin datos suficientes.', [
@@ -1133,6 +1329,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
         } else if (text.includes('/invitar') || text.includes('invitar') || text.includes('familiar') || text.includes('invitado')) {
+            if (global.pendingGuestNameForChat) delete global.pendingGuestNameForChat[chatId];
+            if (global.pendingGuestAddForChat) delete global.pendingGuestAddForChat[chatId];
             const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
             if (myDevs.length === 0) {
                 await sendTelegramMessage(chatId, `⚠️ Solo el propietario administrador puede agregar o gestionar familiares en el monitor.`, []);
@@ -1140,11 +1338,26 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 let txt = `👥 <b>GESTIÓN DE FAMILIARES E INVITADOS</b>\n\n`;
                 const btns = [];
                 myDevs.forEach(d => {
-                    const n = (d.guestChatIds || []).length;
-                    txt += `• <b>${d.alias || d.deviceId}</b> — ${n} invitado(s)\n`;
-                    btns.push([{ text: `➕ Agregar Familiar a ${d.alias || d.deviceId}`, callback_data: `/pedirinvitado_${d.deviceId}` }]);
-                    if (n > 0) btns.push([{ text: `❌ Quitar Invitados de ${d.alias || d.deviceId}`, callback_data: `/quitarinvitado_${d.deviceId}` }]);
+                    const guests = d.guestChatIds || [];
+                    const n = guests.length;
+                    const devName = d.alias || d.deviceId;
+                    txt += `📍 <b>${devName}</b> (${n} familiar${n === 1 ? '' : 'es'}):\n`;
+                    if (n === 0) {
+                        txt += `  <i>Sin familiares registrados</i>\n\n`;
+                    } else {
+                        guests.forEach((gId, idx) => {
+                            const name = getGuestName(d, gId, idx);
+                            txt += `  • 👤 <b>${name}</b> (ID: <code>${gId}</code>)\n`;
+                        });
+                        txt += `\n`;
+                    }
+                    btns.push([{ text: `➕ Agregar Familiar a ${devName}`, callback_data: `/pedirinvitado_${d.deviceId}` }]);
+                    if (n > 0) {
+                        btns.push([{ text: `✏️ Renombrar Familiar en ${devName}`, callback_data: `/editarguest_${d.deviceId}` }]);
+                        btns.push([{ text: `❌ Quitar Familiar de ${devName}`, callback_data: `/quitarinvitado_${d.deviceId}` }]);
+                    }
                 });
+                btns.push([{ text: '🏠 Mis Monitores', callback_data: '/casas' }]);
                 await sendTelegramMessage(chatId, txt, btns);
             }
 
@@ -1207,21 +1420,19 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 );
             }
 
-        } else if (text.includes('/chatid') || text.includes('chatid') || text.includes('mi id')) {
-            await sendTelegramMessage(chatId, `🆔 <b>Tu Chat ID de Telegram:</b>`, []);
+        } else if (text.includes('/chatid') || text.includes('/id') || text.includes('chatid') || text.includes('chat id') || text.includes('mi id')) {
+            await sendTelegramMessage(chatId, `su chat id es:`, []);
             await sendTelegramMessage(chatId, `<code>${chatId}</code>`, []);
-            await sendTelegramMessage(chatId, `💡 <i>Toca el número arriba para copiarlo automáticamente con 1 toque.</i>`,
-                [[{ text: '📊 Estado en Vivo', callback_data: '/estado' }]]
-            );
 
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const myDevs = getMyDevs();
             if (myDevs.length > 0) {
                 const d = myDevs[0];
                 const on = (Date.now() - d.lastSeen) < 240000;
+                const roleTag = checkIsOwner(d, chatId) ? '(Propietario)' : '(Invitado)';
                 await sendTelegramMessage(chatId,
-                    `⚡ <b>¡Hola ${senderName}! Bienvenido a Monitor de Luz</b>\n\n` +
-                    `Tu monitor <b>${d.alias || d.deviceId}</b> está ${on ? '🟢 CON LUZ' : '🔴 SIN LUZ'}.\n\n¿Qué deseas hacer?`,
+                    `⚡ <b>¡Hola ${senderName}! Bienvenido a CREALO Powerwatch</b>\n\n` +
+                    `Tu monitor <b>${d.alias || d.deviceId}</b> ${roleTag} está ${on ? '🟢 CON LUZ' : '🔴 SIN LUZ'}.\n\n¿Qué deseas hacer?`,
                     [
                         [{ text: '📍 Ver Ubicaciones (Web App) 📱', web_app: { url: `https://monitor-luz-vercel-six.vercel.app/devices?chatId=${chatId}` } }],
                         [{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
@@ -1234,7 +1445,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 );
             } else {
                 await sendTelegramMessage(chatId,
-                    `⚡ <b>¡Hola ${senderName}! Bienvenido a Créalo PowerWatch</b>\n\nTu Chat ID de Telegram (toca el número para copiarlo):`,
+                    `⚡ <b>¡Hola ${senderName}! Bienvenido a CREALO Powerwatch</b>\n\nTu Chat ID de Telegram (toca el número para copiarlo):`,
                     []
                 );
                 await sendTelegramMessage(chatId, `<code>${chatId}</code>`, []);
@@ -1262,31 +1473,28 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
 // Helper: verificar si un chatId es el Titular (Dueño) de un dispositivo
 function checkIsOwner(device, chatId) {
-    if (!device) return true;
+    if (!device || device.unlinked) return false;
     let reqId = String(chatId || '').trim();
-    let devOwnerId = String(device.chatId || '').trim();
+    if (!reqId) reqId = '330749449'; // Franklin por defecto en acceso web directo
     if (reqId === '3307499449') reqId = '330749449';
+
+    let devOwnerId = String(device.chatId || '').trim();
     if (devOwnerId === '3307499449') devOwnerId = '330749449';
 
     // Lista de invitados registrados
     const guests = (device.guestChatIds || []).map(g => String(g).trim());
 
     // Si explícitamente es un familiar invitado registrado -> Invitado (NO Titular)
-    if (reqId && guests.includes(reqId)) {
+    if (guests.includes(reqId)) {
         return false;
     }
 
     // Si coincide con el Chat ID del titular registrado
-    if (reqId && devOwnerId && reqId === devOwnerId) {
+    if (devOwnerId && reqId === devOwnerId) {
         return true;
     }
 
-    // Si no se pasó chatId (acceso directo del titular desde navegador/favoritos)
-    // se reconoce automáticamente como Titular para no bloquear al dueño
-    if (!reqId) {
-        return true;
-    }
-
+    // Si el dispositivo no tiene dueño configurado aún o está desvinculado, NO es dueño
     return false;
 }
 
@@ -1328,6 +1536,7 @@ app.post('/api/device-unlinked', async (req, res) => {
         device.resetRequested = true; // Forzar reinicio WiFi si vuelve a conectarse
         device.chatId = '';
         device.guestChatIds = []; // Limpiar familiares
+        device.guestNames = {};
         device.alias = deviceId; // Restablecer alias
         if (global.aliases[deviceId]) delete global.aliases[deviceId];
         device.blackoutNotified = false;
@@ -1340,7 +1549,7 @@ app.post('/api/device-unlinked', async (req, res) => {
 
 // 4. ENDPOINT PARA BORRAR EL HISTORIAL DE UN DISPOSITIVO (POST /api/clear-history)
 app.post('/api/clear-history', async (req, res) => {
-    loadFromDisk();
+    await loadFromCloud();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const reqChatId = (req.body.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
@@ -1418,8 +1627,9 @@ app.get('/api/cron-daily-report', async (req, res) => {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449';
 
-        // GUARDIA: Si ya se envió en las últimas 12 horas, omitir
-        if (dev.lastDailyReportSentAt && (now - dev.lastDailyReportSentAt < 12 * 60 * 60 * 1000)) {
+        const force = req.query.force === 'true';
+        // GUARDIA: Si ya se envió en las últimas 12 horas, omitir (a menos que sea force=true)
+        if (!force && dev.lastDailyReportSentAt && (now - dev.lastDailyReportSentAt < 12 * 60 * 60 * 1000)) {
             console.log(`[DAILY-REPORT] Reporte diario ya enviado recientemente a ${dev.deviceId}. Omitiendo.`);
             continue;
         }
@@ -1456,25 +1666,24 @@ app.get('/api/devices-list', (req, res) => {
         let reqChatId = String(req.query.chatId || '').trim();
         // Corrección de bug conocido de Telegram ID para Franklin
         if (reqChatId === '3307499449') reqChatId = '330749449';
+        if (!reqChatId) reqChatId = '330749449';
 
         const devices = Object.values(combined).map(device => {
             const deviceId = (device.deviceId || device.id || '').toString().toUpperCase();
             if (!deviceId) return null;
+            if (device.unlinked) return null;
 
-            // Lógica de filtrado por chatId
-            if (reqChatId) {
-                let devOwnerId = String(device.chatId || '').trim();
-                if (devOwnerId === '3307499449') devOwnerId = '330749449';
-                const guests = (device.guestChatIds || []).map(g => String(g).trim());
+            // Lógica de filtrado y rol por chatId
+            const isGuest = reqChatId ? (device.guestChatIds || []).map(g => String(g).trim()).includes(reqChatId) : false;
+            const isOwner = checkIsOwner(device, reqChatId);
 
-                const isOwner = reqChatId === devOwnerId;
-                const isGuest = guests.includes(reqChatId);
-
-                // Si no es dueño ni invitado, no se le muestra este dispositivo
-                if (!isOwner && !isGuest) {
-                    return null;
-                }
+            // Si se pasa reqChatId y no es dueño ni invitado, no se le muestra este dispositivo
+            if (reqChatId && !isOwner && !isGuest) {
+                return null;
             }
+
+            const role = isOwner ? 'propietario' : 'invitado';
+            const roleLabel = isOwner ? 'Propietario' : 'Invitado';
 
             const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
             const lastSeen = device.lastSeen || 0;
@@ -1482,7 +1691,19 @@ app.get('/api/devices-list', (req, res) => {
             const isOnline = lastSeen && elapsedMs !== null && elapsedMs < OFFLINE_THRESHOLD_MS;
             const statusCode = isOnline ? 'online' : 'offline';
             const uptimeMs = (isOnline && device.onlineSince) ? Math.max(0, now - device.onlineSince) : 0;
-            return { deviceId, alias, lastSeen, elapsedMs, uptimeMs, statusCode, history: device.history || [] };
+            return { 
+                deviceId, 
+                alias, 
+                lastSeen, 
+                elapsedMs, 
+                uptimeMs, 
+                statusCode, 
+                role,
+                roleLabel,
+                isOwner,
+                isGuest,
+                history: device.history || [] 
+            };
         }).filter(Boolean);
 
         devices.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
@@ -1490,6 +1711,108 @@ app.get('/api/devices-list', (req, res) => {
     } catch (e) {
         console.error('[devices-list ERROR]', e.message);
         return res.json({ devices: [], total: 0, error: e.message });
+    }
+});
+
+const p2pCache = new Map();
+
+// ENDPOINT ULTRA-RÁPIDO BINANCE P2P PARA MONITOR ESP32 CYD
+app.get('/api/p2p', async (req, res) => {
+    try {
+        const tradeType = (req.query.tradeType || 'BUY').toUpperCase();
+        const payType = req.query.payType || 'PagoMovil';
+        const fiat = (req.query.fiat || 'VES').toUpperCase();
+        const asset = (req.query.asset || 'USDT').toUpperCase();
+        const transAmount = req.query.transAmount ? parseFloat(req.query.transAmount) : null;
+        const rows = Math.min(parseInt(req.query.rows || '8', 10), 15);
+
+        const cacheKey = `${tradeType}_${payType}_${fiat}_${asset}_${transAmount}_${rows}`;
+        const cached = p2pCache.get(cacheKey);
+        if (cached && (Date.now() - cached.time < 3500)) {
+            res.setHeader('Cache-Control', 's-maxage=3, stale-while-revalidate=5');
+            return res.json(cached.data);
+        }
+
+        const binanceRes = await fetch('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            },
+            body: JSON.stringify({
+                proMerchantAds: false,
+                page: 1,
+                rows: rows,
+                payTypes: payType === 'ALL' ? [] : [payType],
+                transAmount: transAmount || undefined,
+                countries: [],
+                publisherType: null,
+                fiat: fiat,
+                tradeType: tradeType,
+                asset: asset
+            })
+        });
+
+        const json = await binanceRes.json();
+        const rawAds = (json && Array.isArray(json.data)) ? json.data : [];
+
+        const ads = rawAds.map(item => {
+            const adv = item.adv || {};
+            const advertiser = item.advertiser || {};
+            const methods = (adv.tradeMethods || []).map(m => m.identifier || m.tradeMethodName || '').filter(Boolean);
+            return {
+                name: (advertiser.nickName || 'Comerciante').substring(0, 18),
+                orders: advertiser.monthOrderCount || 0,
+                rate: (advertiser.monthFinishRate ? (advertiser.monthFinishRate * 100).toFixed(1) + '%' : '100%'),
+                price: parseFloat(adv.price || '0').toFixed(2),
+                min: parseFloat(adv.minSingleTransAmount || '0').toLocaleString('es-VE'),
+                max: parseFloat(adv.dynamicMaxSingleTransAmount || adv.maxSingleTransAmount || '0').toLocaleString('es-VE'),
+                crypto: parseFloat(adv.surplusAmount || '0').toLocaleString('es-VE'),
+                banks: methods.slice(0, 2)
+            };
+        });
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('es-VE', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'America/Caracas'
+        });
+
+        const resultPayload = {
+            success: true,
+            tradeType,
+            fiat,
+            asset,
+            updatedAt: timeStr,
+            total: ads.length,
+            ads
+        };
+
+        p2pCache.set(cacheKey, { time: Date.now(), data: resultPayload });
+        res.setHeader('Cache-Control', 's-maxage=3, stale-while-revalidate=5');
+        return res.json(resultPayload);
+    } catch (e) {
+        console.error('[P2P API ERROR]:', e.message);
+        return res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/p2p-methods', async (req, res) => {
+    try {
+        const binanceRes = await fetch('https://p2p.binance.com/bapi/c2c/v2/public/c2c/adv/filter-conditions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            },
+            body: JSON.stringify({ fiat: 'VES' })
+        });
+        const data = await binanceRes.json();
+        return res.json(data);
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
     }
 });
 
@@ -1502,12 +1825,12 @@ app.get('/api/devices', (req, res) => {
 
 // 7. ENDPOINT PARA CONSULTAR EL ESTADO E HISTORIAL (GET /api/status/:id)
 app.get('/api/status/:id', async (req, res) => {
-    if (!isCloudLoaded) {
-        await loadFromCloud();
-    }
+    await loadFromCloud();
     await checkBlackoutAlerts();
     const deviceId = (req.params.id || '').toString().trim().toUpperCase();
-    const reqChatId = (req.query.chatId || req.headers['x-chat-id'] || '').toString().trim();
+    let reqChatId = (req.query.chatId || req.headers['x-chat-id'] || '').toString().trim();
+    if (reqChatId === '3307499449') reqChatId = '330749449';
+    if (!reqChatId) reqChatId = '330749449';
     const device = getDevice(deviceId);
     const storedAlias = global.aliases[deviceId] || (device ? device.alias : null) || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
 
@@ -1617,5 +1940,99 @@ app.post('/api/sync-history', (req, res) => {
     return res.json({ success: true, history: mergedHistory });
 });
 
-module.exports = app;
 
+
+// =========================================================================
+// ENDPOINTS PARA GESTION DE FLOTA Y ACTUALIZACIONES OTA (FIRMWARE .BIN)
+// =========================================================================
+const multer = require('multer');
+const { put } = require('@vercel/blob');
+const upload = multer({ storage: multer.memoryStorage() });
+
+// 9. SUBIR ARCHIVO .BIN (PENDIENTE)
+app.post('/api/ota/upload', upload.single('firmware'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
+        
+        // Subir a Vercel Blob
+        const blob = await put(`firmware-${Date.now()}.bin`, req.file.buffer, {
+            access: 'public',
+            token: process.env.BLOB_READ_WRITE_TOKEN
+        });
+
+        // Guardar como "pendiente" en Redis (aún no se despliega a las placas)
+        await redis.set('ota_pending_firmware', blob.url);
+        
+        return res.json({ success: true, url: blob.url });
+    } catch (error) {
+        console.error('[OTA Upload Error]', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+// 10. DESPLEGAR ACTUALIZACIÓN (ACTIVAR)
+app.post('/api/ota/deploy', async (req, res) => {
+    try {
+        const pendingUrl = await redis.get('ota_pending_firmware');
+        if (!pendingUrl) return res.status(400).json({ error: 'No hay firmware pendiente' });
+
+        // Leer la versión actual y subirla
+        const currentVersion = await redis.get('ota_active_version') || 1.0;
+        const newVersion = parseFloat(currentVersion) + 0.1;
+
+        // Establecer como activo
+        await redis.set('ota_active_firmware', pendingUrl);
+        await redis.set('ota_active_version', newVersion.toFixed(1));
+        
+        // Limpiar el pendiente
+        await redis.del('ota_pending_firmware');
+
+        return res.json({ success: true, version: newVersion.toFixed(1) });
+    } catch (error) {
+        console.error('[OTA Deploy Error]', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+// 11. ENDPOINT DE DESCARGA DIRECTA PARA EL ESP8266 (AUTO-OTA)
+app.all('/api/ota/download', async (req, res) => {
+    console.log('OTA Download Request ALL:', req.method, req.url);
+    console.log('OTA Download Request:', req.url, req.headers, req.query);
+    try {
+        const boardVersion = parseFloat(req.query.version || '1.0');
+        const activeVersion = parseFloat(await redis.get('ota_active_version') || '1.0');
+        const activeUrl = await redis.get('ota_active_firmware');
+
+        if (activeUrl && activeVersion > boardVersion) {
+            // Le decimos a la placa que sí hay actualización y la redirigimos al archivo .bin
+            const response = await fetch(activeUrl);
+            if (!response.ok) return res.status(500).send('Blob fetch failed');
+            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Length', response.headers.get('content-length'));
+            const buffer = await response.arrayBuffer();
+            return res.send(Buffer.from(buffer));
+        } else {
+            // Le decimos a la placa que NO hay actualizaciones (código 304 estándar de OTA)
+            return res.status(304).send('Not Modified');
+        }
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+// 12. ENDPOINT PARA EL PANEL DE ADMINISTRACIÓN (ESTADO OTA)
+app.get('/api/ota/status', async (req, res) => {
+    try {
+        const activeVersion = await redis.get('ota_active_version') || '1.0';
+        const pendingFirmware = await redis.get('ota_pending_firmware');
+        return res.json({ 
+            active_version: parseFloat(activeVersion).toFixed(1), 
+            has_pending: !!pendingFirmware 
+        });
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+
+module.exports = app;

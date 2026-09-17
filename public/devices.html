@@ -17,7 +17,7 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 .wrap{width:100%;max-width:500px}
 .brand{display:flex;flex-direction:column;align-items:center;margin-bottom:28px;gap:6px}
 .brow{display:flex;align-items:center;gap:10px}
-.bsvg{width:44px;height:44px;filter:drop-shadow(0 0 12px rgba(249,115,22,.4))}
+.bsvg, .blogo-img{width:44px;height:44px;border-radius:12px;object-fit:cover;box-shadow:0 0 16px rgba(34,197,94,.45)}
 .bname{font-size:1.45rem;font-weight:900;letter-spacing:2px;color:#fff;text-transform:uppercase}
 .bprod{font-size:.82rem;font-weight:600;letter-spacing:3px;color:#f97316;text-transform:uppercase}
 .btag{font-size:.78rem;color:var(--sub)}
@@ -34,14 +34,17 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 .dcard:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
 .dcard.online{border-color:rgba(16,185,129,.35);background:rgba(16,185,129,.05)}
 .dcard.offline{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.05)}
-.dhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.dalias{font-size:1.05rem;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px}
+.dhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px}
+.dalias{font-size:1.05rem;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .dot.online{background:#10b981;box-shadow:0 0 8px rgba(16,185,129,.7);animation:pd 2s ease-in-out infinite}
 .dot.offline{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,.6)}
 .dot.unknown{background:#64748b}
 @keyframes pd{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(1.3)}}
-.pill{font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.5px}
+.role-pill{font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;white-space:nowrap}
+.role-pill.owner{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.35)}
+.role-pill.guest{background:rgba(59,130,246,.15);color:#60a5fa;border:1px solid rgba(59,130,246,.35)}
+.pill{font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
 .pill.online{background:rgba(16,185,129,.2);color:#34d399;border:1px solid rgba(16,185,129,.4)}
 .pill.offline{background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
 .pill.unknown{background:rgba(100,116,139,.2);color:#94a3b8;border:1px solid rgba(100,116,139,.3)}
@@ -69,14 +72,7 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 <div class="wrap">
   <div class="brand">
     <div class="brow">
-      <svg class="bsvg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="50" cy="50" r="44" stroke="#f97316" stroke-width="7" stroke-dasharray="180 30" stroke-linecap="round"/>
-        <circle cx="50" cy="50" r="38" fill="#1e293b"/>
-        <circle cx="50" cy="50" r="30" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="2 6"/>
-        <path d="M 68 34 A 7 7 0 1 1 61 27" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
-        <line x1="65" y1="23" x2="65" y2="30" stroke="#f97316" stroke-width="2.5" stroke-linecap="round"/>
-        <polygon points="53,16 35,50 49,50 43,84 65,44 51,44" fill="#f97316"/>
-      </svg>
+      <img src="/icon.png" class="blogo-img" alt="CREALO PowerWatch Logo">
       <div>
         <div class="bname">CREALO</div>
         <div class="bprod">PowerWatch</div>
@@ -115,7 +111,7 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 <script>
 var cid = '';
 try {
-  cid = localStorage.getItem('monitor_chat_id') || '';
+  cid = localStorage.getItem('monitor_chat_id') || '330749449';
 } catch (e) {
   console.warn('localStorage no disponible:', e);
 }
@@ -155,10 +151,12 @@ async function load(){
     var q=cid?('?chatId='+encodeURIComponent(cid)):'';
     var ctrl=new AbortController();
     var tmr=setTimeout(function(){ctrl.abort();},12000);
-    var res=await fetch('/api/devices-list'+q,{signal:ctrl.signal});
+    var res=await fetch('/api/devices-list?_t='+Date.now()+(q?'&'+q.substring(1):'').replace('??','?'),{signal:ctrl.signal});
     clearTimeout(tmr);
     var data=await res.json();
-    var devs=Array.isArray(data.devices)?data.devices:[];
+    var devs=(Array.isArray(data.devices)?data.devices:[]).filter(function(d){
+      return !d.unlinked && d.statusCode !== 'unlinked';
+    });
     var on=devs.filter(function(d){return d.statusCode==='online';}).length;
     var off=devs.filter(function(d){return d.statusCode==='offline';}).length;
     document.getElementById('stotal').textContent=devs.length;
@@ -186,14 +184,22 @@ async function load(){
       var el2=sc==='online'?fup(d.uptimeMs):fel(d.elapsedMs);
       var cuts=wkc(d.history);
       var ls=d.lastSeen?new Date(d.lastSeen).toLocaleTimeString('es-VE',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/Caracas'}):'-';
+      var isOwn=(d.role==='propietario'||d.isOwner===true||d.roleLabel==='Propietario'||(!d.role&&!d.roleLabel));
+      if(d.role==='invitado'||d.isGuest===true||d.roleLabel==='Invitado') isOwn=false;
+      var rClass=isOwn?'owner':'guest';
+      var rIcon=isOwn?'&#128081;':'&#128101;';
+      var rText=isOwn?'Propietario':'Invitado';
+      var rBadge='<span class="role-pill '+rClass+'">'+rIcon+' '+rText+'</span>';
+
       html+='<a class="dcard '+sc+'" href="'+url+'">';
-      html+='<div class="dhead"><div class="dalias"><span class="dot '+sc+'"></span>'+al+'</div>';
+      html+='<div class="dhead"><div class="dalias"><span class="dot '+sc+'"></span><span>'+al+'</span> '+rBadge+'</div>';
       html+='<span class="pill '+sc+'">'+pt+'</span></div>';
       html+='<div class="dmeta">';
       html+='<div class="dmi"><span class="dml">ID Placa</span><span class="dmv" style="font-family:monospace;font-size:.8rem">'+d.deviceId+'</span></div>';
+      html+='<div class="dmi"><span class="dml">Rol</span><span class="dmv" style="color:'+(isOwn?'#fbbf24':'#60a5fa')+';font-weight:700">'+rIcon+' '+rText+'</span></div>';
       html+='<div class="dmi"><span class="dml">Ultimo Reporte</span><span class="dmv">'+ls+'</span></div>';
       html+='<div class="dmi"><span class="dml">'+(sc==='online'?'Con Luz':'Sin Luz')+'</span><span class="dmv">'+el2+'</span></div>';
-      html+='<div class="dmi"><span class="dml">Cortes semana</span><span class="dmv">'+cuts+'</span></div>';
+      html+='<div class="dmi" style="grid-column:span 2"><span class="dml">Cortes semana</span><span class="dmv">'+cuts+'</span></div>';
       html+='</div><span class="darr">&#8594;</span></a>';
     }
     el.innerHTML=html;
@@ -219,6 +225,10 @@ document.getElementById('mid').addEventListener('keydown',function(e){if(e.key==
       try { localStorage.setItem('monitor_chat_id',cid); } catch(e){}
     } else {
       try { cid = localStorage.getItem('monitor_chat_id') || ''; } catch(e){}
+      if (!cid) {
+        cid = '330749449';
+        try { localStorage.setItem('monitor_chat_id', cid); } catch(e){}
+      }
     }
   } catch(e) {
     console.error('Error en init variables:', e);
