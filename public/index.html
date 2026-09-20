@@ -621,7 +621,7 @@
             const lastDate = new Date(lastSeenTimestamp);
             document.getElementById('lastReportText').textContent = lastDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
-            if (data.found && data.status === 'online' && data.elapsedMs < 480000) {
+            if (data.found && data.status === 'online' && data.elapsedMs < 510000) {
                 renderState('online', 'HAY LUZ ⚡', 'Tu casa tiene energía eléctrica e internet funcionando perfectamente.');
 
                 // Formatear Tiempo Continuo con Luz

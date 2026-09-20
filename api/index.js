@@ -55,6 +55,10 @@ const TMP_FILE = '/tmp/monitor-luz-devices.json';
 const ALIAS_FILE = '/tmp/monitor-luz-aliases.json';
 const GUEST_FILE = '/tmp/monitor-luz-guest-names.json';
 
+// UMBRAL UNIFICADO DE DESCONEXIÓN: 8.5 minutos (510 segundos)
+// Proporciona margen sólido contra micro-cortes de internet (Telemic/Inter/CANTV) y cold-starts de Vercel
+const OFFLINE_THRESHOLD_MS = 510000;
+
 // Guardar datos del dispositivo, alias y familiares en archivos /tmp y Redis en la nube
 function saveToDisk() {
     try {
@@ -739,7 +743,7 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const now = Date.now();
     const lastSeen = dev.lastSeen || now;
     const elapsed = now - lastSeen;
-    const online = elapsed < 240000;
+    const online = elapsed < OFFLINE_THRESHOLD_MS;
     const name = dev.alias || dev.deviceId || devId;
     const activeDevId = dev.deviceId || devId;
     const webLink = getWebUrl(activeDevId, targetChatId || dev.chatId);
@@ -847,12 +851,13 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado 390 segundos sin señal (6.5 minutos de gracia sólida anti-falsos positivos de serverless) y no se ha notificado la ida de luz
-        if (elapsedMs >= 390000 && !dev.blackoutNotified && devChatId) {
+        // Si han pasado 510 segundos (8.5 minutos de gracia sólida anti-falsos positivos de red/serverless) y no se ha notificado la ida de luz
+        if (elapsedMs >= OFFLINE_THRESHOLD_MS && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
-            dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz
+            dev.blackoutStartTime = dev.lastSeen; // Momento exacto en que se fue la luz / internet
             dev.history = dev.history || [];
+            dev.lastAlertMessages = dev.lastAlertMessages || {};
 
             // Agregar registro de corte pendiente (sin hora de regreso aún)
             const cutoffDate = new Date(dev.lastSeen);
@@ -891,6 +896,20 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
             const sendRes = await sendTelegramMessage(devChatId, alertMsg);
             const msgId = sendRes?.messageId || null;
             dev.lastAlertMessageId = msgId;
+            if (msgId) dev.lastAlertMessages[devChatId] = msgId;
+
+            // Enviar alerta a todos los invitados/familiares autorizados y registrar sus message_ids individuales
+            const guests = dev.guestChatIds || [];
+            for (const gId of guests) {
+                if (gId && gId !== devChatId) {
+                    const gRes = await sendTelegramMessage(gId, alertMsg, [
+                        [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${dev.deviceId}` }]
+                    ]);
+                    if (gRes?.messageId) {
+                        dev.lastAlertMessages[gId] = gRes.messageId;
+                    }
+                }
+            }
 
             persistDevice(dev.deviceId, {
                 ...dev,
@@ -898,18 +917,9 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
                 chatId: devChatId,
                 blackoutStartTime: dev.lastSeen,
                 lastAlertMessageId: msgId,
+                lastAlertMessages: dev.lastAlertMessages,
                 history: dev.history
             });
-
-            // Enviar alerta a todos los invitados/familiares autorizados
-            const guests = dev.guestChatIds || [];
-            for (const gId of guests) {
-                if (gId && gId !== devChatId) {
-                    await sendTelegramMessage(gId, alertMsg, [
-                        [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${dev.deviceId}` }]
-                    ]);
-                }
-            }
             await saveToCloud();
         }
     }
@@ -973,53 +983,25 @@ app.post('/api/ping', async (req, res) => {
     } else if (existing.lastSeen) {
         blackoutStart = existing.lastSeen;
     } else {
-        blackoutStart = now - 240000;
+        blackoutStart = now - OFFLINE_THRESHOLD_MS;
     }
     const computedDurationMs = Math.max(now - blackoutStart, 60000);
 
     // -------------------------------------------------------------------------
-    // DISCRIMINACIÓN DE HARDWARE REAL VS FALSA ALARMA DE VERCEL:
+    // DISCRIMINACIÓN INTELIGENTE DE HARDWARE:
     // -------------------------------------------------------------------------
-    // 1. Corte de Luz Real: La placa se apagó físicamente (boardUptimeMs < computedDurationMs - 15000)
-    // 2. Caída de Internet Real: La placa estuvo encendida pero reporta que Google/Cloudflare NO respondieron (offlinePings > 0).
-    // 3. Falsa Alarma (Retraso de Vercel): La placa estuvo encendida todo el tiempo (boardUptimeMs > computedDurationMs) Y Google estuvo activo (offlinePings === 0).
+    // 1. Corte de Luz Real: La placa se apagó físicamente (su uptime es menor al tiempo transcurrido desde el corte)
+    // 2. Caída de Internet Real: La placa se mantuvo encendida todo el tiempo (su uptime supera la duración del corte).
+    //    Esto confirma que en la casa SÍ hubo electricidad en todo momento.
     const chipStayedPoweredOn = boardUptimeMs > (computedDurationMs + 5000);
-    const googleWasAlive = (offlinePings === 0);
-    const isVercelFalseAlarm = chipStayedPoweredOn && googleWasAlive;
+    const wasAlertSent = wasBlackout || Boolean(existing.blackoutStartTime) || Boolean(existing.lastAlertMessageId);
 
-    if (isVercelFalseAlarm) {
-        // La placa NUNCA se apagó y Google SIEMPRE respondió.
-        // 1. Si Vercel envió una alerta falsa a Telegram por retraso, BORRARLA de Telegram:
-        if (existing.lastAlertMessageId) {
-            if (targetChatId) await deleteTelegramMessage(targetChatId, existing.lastAlertMessageId);
-            const guests = existing.guestChatIds || [];
-            for (const gId of guests) {
-                if (gId) await deleteTelegramMessage(gId, existing.lastAlertMessageId);
-            }
-            existing.lastAlertMessageId = null;
-        }
-
-        // 2. Si el servidor había abierto una falsa alerta mientras dormía, la ELIMINAMOS por completo:
-        if (history.length > 0 && !history[0].end) {
-            history.shift(); // Borrar el evento falso para que NUNCA aparezca en el Dashboard ni en Telegram
-        }
-        existing.blackoutNotified = false;
-        existing.blackoutStartTime = null;
-        console.log(`[PING] Falsa alarma de Vercel descartada y purgada para ${deviceId}. Uptime: ${Math.round(boardUptimeMs/60000)}m, offlinePings: 0.`);
-    }
-
-    const isRealPowerOutage = !chipStayedPoweredOn && computedDurationMs >= 180000;
-    const isRealInternetDrop = chipStayedPoweredOn && (offlinePings > 0) && computedDurationMs >= 180000;
-
-    let isReturnFromBlackout = (isRealPowerOutage || isRealInternetDrop) && !isVercelFalseAlarm;
-
-    if (shouldReset) {
-        isReturnFromBlackout = false;
-    }
+    // Es un retorno si se había notificado previamente la desconexión O si la duración superó el umbral
+    const isReturnFromBlackout = !shouldReset && (wasAlertSent || computedDurationMs >= OFFLINE_THRESHOLD_MS);
 
     // Determinar la fecha de encendido inicial (onlineSince)
     let onlineSince = existing.onlineSince || (boardUptimeMs > 0 ? (now - boardUptimeMs) : now);
-    if (isReturnFromBlackout && isRealPowerOutage) {
+    if (isReturnFromBlackout && !chipStayedPoweredOn) {
         onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
     }
 
@@ -1042,11 +1024,11 @@ app.post('/api/ping', async (req, res) => {
         const returnTimeStr = returnDate.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
         const returnDateStr = returnDate.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
 
-        // DISCRIMINACIÓN INTELIGENTE CON BASE EN GOOGLE/CLOUDFLARE:
+        // Clasificación inteligente del evento:
         let eventType = 'power_outage';
-        if (isRealInternetDrop) {
+        if (chipStayedPoweredOn) {
             eventType = 'internet_drop';
-        } else if (totalMins < 5 && isRealPowerOutage) {
+        } else if (totalMins < 5) {
             eventType = 'fluctuation';
         } else {
             eventType = 'power_outage';
@@ -1082,31 +1064,20 @@ app.post('/api/ping', async (req, res) => {
         const geoSuffix = (existing.city && existing.isp) ? ` <i>(${existing.city}, ${existing.region || ''} — ${existing.isp} 🌐)</i>` : '';
 
         let returnMsg = "";
-        if (eventType === 'fluctuation') {
-            returnMsg = `⚡ <b>¡ENERGÍA / RED NORMALIZADA!</b>\n\n` +
-                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
-                        `⏰ <b>Hora de restablecimiento:</b> ${returnTimeStr} (${returnDateStr})\n` +
-                        `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
-                        `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o una micro-caída de internet en tu casa.</i>\n\n` +
-                        `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
-                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
-        } else if (eventType === 'vercel_latency') {
-            alertMsg = `☁️ <b>Falsa Alarma (Latencia)</b>\n` +
-                       `⏰ <b>Hora de resolución:</b> ${returnTimeStr}\n\n` +
-                       `El internet y la luz siempre estuvieron bien. Hubo un retraso temporal de los servidores en la nube de Vercel.\n\n` +
-                       `⏳ <b>Duración del retraso:</b> ${durationFormatted}\n` +
-                       `📱 <b>Dispositivo:</b> ${deviceAlias}\n` +
-                       `🔗 <b>Monitor:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
-            // Remover del historial para que no ensucie la web de cortes reales
-            if (history.length > 0 && history[0].type === 'vercel_latency') {
-                history.shift();
-            }
-        } else if (eventType === 'internet_drop') {
+        if (eventType === 'internet_drop') {
             returnMsg = `🌐 <b>¡SERVICIO DE INTERNET RESTABLECIDO!</b>\n\n` +
                         `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
                         `⏰ <b>Hora de reconexión:</b> ${returnTimeStr} (${returnDateStr})\n` +
                         `⏱️ <b>Tiempo sin conexión:</b> ${durationFormatted}\n\n` +
-                        `💡 <i>Confirmado: **En tu casa SÍ hubo luz todo el tiempo**. La falla fue exclusivamente de tu **proveedor de internet (CANTV/Fibra)**.</i>\n\n` +
+                        `💡 <i>Confirmado: **En tu casa SÍ hubo luz todo el tiempo**. La placa se mantuvo encendida continuamente; la interrupción fue de tu proveedor de internet / red.</i>\n\n` +
+                        `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
+                        `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
+        } else if (eventType === 'fluctuation') {
+            returnMsg = `⚡ <b>¡ENERGÍA / RED NORMALIZADA!</b>\n\n` +
+                        `📍 <b>Ubicación:</b> <code>${deviceAlias}</code>${geoSuffix}\n` +
+                        `⏰ <b>Hora de restablecimiento:</b> ${returnTimeStr} (${returnDateStr})\n` +
+                        `⏱️ <b>Tiempo fuera de línea:</b> ${durationFormatted}\n\n` +
+                        `💡 <i>Fue un <b>micro-corte eléctrico</b> (bajón de voltaje) o un reinicio breve de red en tu casa.</i>\n\n` +
                         `📱 <b>Dispositivo:</b> <code>${deviceId}</code>\n` +
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         } else {
@@ -1119,9 +1090,8 @@ app.post('/api/ping', async (req, res) => {
                         `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${deviceId}`;
         }
 
-        // Solo enviar notificaciones de regreso a Telegram si el corte duró 5 minutos o más (480000 ms)
-        // Esto evita recibir una alerta de "Servicio Restablecido" si nunca te avisó de la desconexión
-        if (targetChatId && durationMs >= 300000) {
+        // Si se envió alerta previa de desconexión O si duró al menos el umbral, notificar a Telegram
+        if (targetChatId && (wasAlertSent || durationMs >= OFFLINE_THRESHOLD_MS)) {
             console.log(`[NOTIF REGRESO] Enviando aviso a Telegram para ${deviceId} a chatId ${targetChatId}`);
             await sendTelegramMessage(targetChatId, returnMsg);
 
@@ -1156,6 +1126,8 @@ app.post('/api/ping', async (req, res) => {
         },
         blackoutNotified: false, // Resetear bandera al volver la luz
         blackoutStartTime: null,
+        lastAlertMessageId: null,
+        lastAlertMessages: {},
         history: history,
         resetRequested: false,
         unlinked: isUnlinkedNow, 
@@ -1657,7 +1629,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else if (myDevs.length > 1) {
                 await sendTelegramMessage(chatId, `🏠 <b>¿Cuál monitor deseas consultar?</b>`,
                     myDevs.map(d => {
-                        const on = (now - d.lastSeen) < 240000;
+                        const on = (now - d.lastSeen) < OFFLINE_THRESHOLD_MS;
                         const isOwn = checkIsOwner(d, chatId);
                         const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
                         return [{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/estado_${d.deviceId}` }];
@@ -1679,7 +1651,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 let txt = `🏠 <b>TUS MONITORES (${myDevs.length}):</b>\n\n`;
                 const btns = [];
                 myDevs.forEach(d => {
-                    const on = (now - d.lastSeen) < 480000;
+                    const on = (now - d.lastSeen) < OFFLINE_THRESHOLD_MS;
                     const isOwn = checkIsOwner(d, chatId);
                     const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
                     const geoSuffix = (d.city && d.isp) ? ` <i>(${d.city} — ${d.isp})</i>` : '';
@@ -1860,7 +1832,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const myDevs = getMyDevs();
             if (myDevs.length > 0) {
                 const d = myDevs[0];
-                const on = (Date.now() - d.lastSeen) < 240000;
+                const on = (Date.now() - d.lastSeen) < OFFLINE_THRESHOLD_MS;
                 await sendTelegramMessage(chatId,
                     `⚡ <b>¡Hola ${senderName}! Bienvenido a Monitor de Luz</b>\n\n` +
                     `Tu monitor <b>${d.alias || d.deviceId}</b> está ${on ? '🟢 CON LUZ' : '🔴 SIN LUZ'}.\n\n¿Qué deseas hacer?`,
@@ -2152,7 +2124,6 @@ app.get('/api/devices-list', (req, res) => {
         }
         const combined = { ...global.persistentStore, ...global.devices };
         const now = Date.now();
-        const OFFLINE_THRESHOLD_MS = 480000;
         
         let reqChatId = String(req.query.chatId || '').trim();
         // Corrección de bug conocido de Telegram ID para Franklin
@@ -2269,10 +2240,10 @@ app.get('/api/status/:id', async (req, res) => {
         });
     }
 
-    // Comprobar si este dispositivo específico está online (menos de 300s / 5 min desde el último reporte)
+    // Comprobar si este dispositivo específico está online (menos de OFFLINE_THRESHOLD_MS desde el último reporte)
     const now = Date.now();
     const elapsedMs = now - device.lastSeen;
-    const isOnline = elapsedMs < 480000;
+    const isOnline = elapsedMs < OFFLINE_THRESHOLD_MS;
     const uptimeMs = isOnline ? (now - (device.onlineSince || device.lastSeen)) : 0;
 
     // Disparo inmediato de alerta de corte si la web detecta que está offline y no se había notificado
