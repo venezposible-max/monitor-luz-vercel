@@ -21,7 +21,16 @@
   ],
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/api/p2p",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, s-maxage=10, stale-while-revalidate=5"
+        }
+      ]
+    },
+    {
+      "source": "/((?!api/p2p).*)",
       "headers": [
         {
           "key": "Cache-Control",
