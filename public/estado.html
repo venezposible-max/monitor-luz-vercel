@@ -783,6 +783,12 @@
     function clearHistory() {
         if (!currentDeviceId) return;
 
+        // GUARDIA DE AUTENTICACIÓN
+        if (!currentChatId) {
+            alert("🔒 AUTENTICACIÓN REQUERIDA\n\nNo se detectó su sesión de Titular.\n\nPor favor abra este monitor desde el botón '📊 Abrir Panel' en su bot de Telegram para verificar que es el Titular antes de borrar el historial.");
+            return;
+        }
+
         // GUARDIA DE SEGURIDAD PARA INVITADOS
         if (!isOwner) {
             alert("⛔ ACCESO DENEGADO\n\nUsted es un Familiar Invitado y no está autorizado para borrar el historial de cortes de luz.\n\nSolo el Titular del dispositivo tiene permisos para realizar esta acción.");
@@ -812,6 +818,11 @@
     async function confirmClearHistoryAction() {
         closeClearHistoryModal();
         if (!currentDeviceId) return;
+
+        if (!currentChatId) {
+            alert("🔒 AUTENTICACIÓN REQUERIDA\n\nNo se detectó su sesión de Titular.");
+            return;
+        }
 
         try {
             // 1. Limpiar memoria local del navegador inmediatamente
@@ -904,6 +915,12 @@
 
     async function requestRemoteReset() {
         if (!currentDeviceId) return;
+
+        // GUARDIA DE AUTENTICACIÓN
+        if (!currentChatId) {
+            alert("🔒 AUTENTICACIÓN REQUERIDA\n\nNo se detectó su sesión de Titular.\n\nPor favor abra este monitor desde el botón '📊 Abrir Panel' en su bot de Telegram para verificar que es el Titular antes de reiniciar la placa.");
+            return;
+        }
 
         // GUARDIA DE SEGURIDAD PARA INVITADOS
         if (!isOwner) {

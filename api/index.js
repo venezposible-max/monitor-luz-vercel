@@ -1217,6 +1217,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
         }
 
         if (!chatId) return res.status(200).send('OK');
+        if (chatId === '3307499449') chatId = '330749449';
 
         // Cargar datos de Redis en tiempo real
         await loadFromCloud();
@@ -1238,6 +1239,13 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = pending.devId;
             const guestChatId = cleanText;
             const existingDev = getDevice(devId) || { deviceId: devId };
+
+            if (!checkIsOwner(existingDev, chatId, true)) {
+                await clearPendingState(chatId);
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede agregar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             existingDev.guestChatIds = existingDev.guestChatIds || [];
             if (!existingDev.guestChatIds.includes(guestChatId)) {
                 existingDev.guestChatIds.push(guestChatId);
@@ -1269,6 +1277,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             await clearPendingState(chatId);
 
             const existingDev = getDevice(devId) || { deviceId: devId };
+            if (!checkIsOwner(existingDev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede gestionar nombres de familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             setGuestName(devId, guestChatId, guestName);
             await saveToCloud();
 
@@ -1300,6 +1313,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             await clearPendingState(chatId);
 
             const existingDev = getDevice(renameDevId) || { deviceId: renameDevId };
+            if (!checkIsOwner(existingDev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede renombrar este monitor.`, []);
+                return res.status(200).send('OK');
+            }
+
             global.aliases[renameDevId] = cleanText;
             existingDev.alias = cleanText;
             existingDev.chatId = existingDev.chatId || chatId;
@@ -1335,6 +1353,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             await clearPendingState(chatId);
             const dev = getDevice(devId) || { deviceId: devId };
 
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede registrar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             await sendTelegramMessage(chatId,
                 `✅ <b>Familiar registrado sin nombre personalizado.</b>\n\n` +
                 `👥 <b>Chat ID:</b> <code>${guestChatId}</code>\n` +
@@ -1353,6 +1376,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.startsWith('/pedirinvitado_')) {
             const devId = text.replace('/pedirinvitado_', '').toUpperCase().trim();
             const dev = getDevice(devId) || { deviceId: devId };
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede agregar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             await setPendingState(chatId, {
                 action: 'ADD_GUEST_CHAT_ID',
                 devId: devId
@@ -1368,6 +1397,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             // MENÚ PARA SELECCIONAR QUÉ FAMILIAR MODIFICAR / RENOMBRAR
             const devId = text.replace('/modificarinvitado_', '').toUpperCase().trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede gestionar familiares.`, []);
+                return res.status(200).send('OK');
+            }
 
             if (!dev || (dev.guestChatIds || []).length === 0) {
                 await sendTelegramMessage(chatId,
@@ -1398,6 +1432,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = (parts[0] || '').toUpperCase().trim();
             const guestChatId = (parts[1] || '').trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede renombrar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             const devName = dev ? (dev.alias || devId) : devId;
             const currentName = getGuestName(dev, guestChatId) || 'Sin nombre';
 
@@ -1422,6 +1462,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = (parts[0] || '').toUpperCase().trim();
             const targetGuestId = (parts[1] || '').trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede eliminar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             const devName = dev ? (dev.alias || devId) : devId;
             const gName = getGuestName(dev, targetGuestId) || 'Familiar';
 
@@ -1442,6 +1488,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             // PANTALLA DE CONFIRMACIÓN PARA ELIMINAR TODOS LOS FAMILIARES
             const devId = text.replace('/askdelallguests_', '').toUpperCase().trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede eliminar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             const devName = dev ? (dev.alias || devId) : devId;
             const count = (dev?.guestChatIds || []).length;
 
@@ -1463,6 +1515,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = (parts[0] || '').toUpperCase().trim();
             const targetGuestId = (parts[1] || '').trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede eliminar familiares.`, []);
+                return res.status(200).send('OK');
+            }
 
             if (dev && targetGuestId) {
                 const gName = getGuestName(dev, targetGuestId) || 'Familiar';
@@ -1496,6 +1553,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
             // ELIMINAR TODOS LOS FAMILIARES DE UN MONITOR TRAS CONFIRMAR
             const devId = text.replace('/delallguests_', '').toUpperCase().trim();
             const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede eliminar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             if (dev) {
                 const prevGuests = [...(dev.guestChatIds || [])];
                 dev.guestChatIds = [];
@@ -1528,6 +1591,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             const devId = text.replace('/quitarinvitado_', '').toUpperCase().trim();
             const dev = getDevice(devId);
 
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede gestionar familiares.`, []);
+                return res.status(200).send('OK');
+            }
+
             if (!dev || (dev.guestChatIds || []).length === 0) {
                 await sendTelegramMessage(chatId,
                     `ℹ️ <b>No hay familiares registrados en <code>${dev ? (dev.alias || devId) : devId}</code>.</b>`,
@@ -1558,6 +1626,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.startsWith('/pedirnombre_')) {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
             const dev = getDevice(devId) || { deviceId: devId };
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede renombrar este monitor.`, []);
+                return res.status(200).send('OK');
+            }
+
             await setPendingState(chatId, {
                 action: 'RENAME_DEVICE',
                 devId: devId
@@ -1673,9 +1747,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
         } else if (text.includes('/nombre') || text.includes('/renombrar') || text.includes('renombrar') || text.includes('asignar')) {
-            const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
+            const myDevs = devs.filter(d => checkIsOwner(d, chatId, true));
             if (myDevs.length === 0) {
-                await sendTelegramMessage(chatId, `⚠️ No tienes dispositivos como administrador vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
+                await sendTelegramMessage(chatId, `⚠️ No tienes dispositivos como propietario administrador vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else {
                 let txt = `🏷️ <b>¿A cuál monitor le cambias el nombre?</b>\n\n`;
                 const btns = [];
@@ -1687,7 +1761,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
         } else if (text.includes('/invitar') || text.includes('invitar') || text.includes('familiar') || text.includes('invitado')) {
-            const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
+            const myDevs = devs.filter(d => checkIsOwner(d, chatId, true));
             if (myDevs.length === 0) {
                 await sendTelegramMessage(chatId, `⚠️ Solo el propietario administrador puede agregar o gestionar familiares en el monitor.`, []);
             } else {
@@ -1720,9 +1794,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.startsWith('/confirm_reset_step1_')) {
             // PASO 2 DE CONFIRMACIÓN: ALERTA CRÍTICA DE DESCONFIGURACIÓN
             const devId = text.replace('/confirm_reset_step1_', '').toUpperCase().trim();
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId && d.deviceId.toUpperCase() === devId);
+            const myDev = devs.find(d => checkIsOwner(d, chatId, true) && d.deviceId.toUpperCase() === devId);
             if (!myDev) {
-                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado o monitor no encontrado.</b>`, []);
+                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado o monitor no encontrado.</b> Solo el propietario puede reiniciar la placa.`, []);
             } else {
                 const devName = myDev.alias || myDev.deviceId;
                 await sendTelegramMessage(chatId,
@@ -1742,9 +1816,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } else if (text.startsWith('/confirm_reset_final_')) {
             // PASO 3: EJECUCIÓN FINAL DE LA ORDEN DE REINICIO
             const devId = text.replace('/confirm_reset_final_', '').toUpperCase().trim();
-            const myDev = devs.find(d => String(d.chatId).trim() === chatId && d.deviceId.toUpperCase() === devId);
+            const myDev = devs.find(d => checkIsOwner(d, chatId, true) && d.deviceId.toUpperCase() === devId);
             if (!myDev) {
-                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador puede reiniciar la placa.`, []);
+                await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador propietario puede reiniciar la placa.`, []);
             } else {
                 if (global.persistentStore[myDev.deviceId]) global.persistentStore[myDev.deviceId].resetRequested = true;
                 if (global.devices[myDev.deviceId]) global.devices[myDev.deviceId].resetRequested = true;
@@ -1759,7 +1833,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         } else if (text.includes('/reiniciar') || text.includes('reiniciar')) {
             // PASO 1 DE CONFIRMACIÓN: PREGUNTAR SI ESTÁ SEGURO
-            const myDevs = devs.filter(d => String(d.chatId).trim() === chatId);
+            const myDevs = devs.filter(d => checkIsOwner(d, chatId, true));
             if (myDevs.length === 0) {
                 await sendTelegramMessage(chatId, `⚠️ <b>Acceso Denegado.</b> Solo el administrador propietario puede reiniciar la placa.`, []);
             } else {
@@ -1856,15 +1930,18 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
 
 // Helper: verificar si un chatId es el Titular (Dueño) de un dispositivo
-function checkIsOwner(device, chatId) {
-    if (!device) return true;
+function checkIsOwner(device, chatId, strict = false) {
+    if (!device) return !strict;
     let reqId = String(chatId || '').trim();
     let devOwnerId = String(device.chatId || '').trim();
     if (reqId === '3307499449') reqId = '330749449';
     if (devOwnerId === '3307499449') devOwnerId = '330749449';
 
     // Lista de invitados registrados
-    const guests = (device.guestChatIds || []).map(g => String(g).trim());
+    const guests = (device.guestChatIds || []).map(g => {
+        let id = String(g).trim();
+        return id === '3307499449' ? '330749449' : id;
+    });
 
     // Si explícitamente es un familiar invitado registrado -> Invitado (NO Titular)
     if (reqId && guests.includes(reqId)) {
@@ -1876,8 +1953,14 @@ function checkIsOwner(device, chatId) {
         return true;
     }
 
-    // Si no se pasó chatId (acceso directo del titular desde navegador/favoritos)
-    // se reconoce automáticamente como Titular para no bloquear al dueño
+    // MODO ESTRICTO (Para acciones destructivas/administrativas como reiniciar WiFi o borrar historial):
+    // Requiere OBLIGATORIAMENTE que el solicitante esté autenticado y coincida con el titular.
+    if (strict) {
+        return false;
+    }
+
+    // Si no se pasó chatId (acceso directo del titular desde navegador/favoritos para modo LECTURA)
+    // se reconoce como Titular para visualización básica
     if (!reqId) {
         return true;
     }
@@ -1887,7 +1970,7 @@ function checkIsOwner(device, chatId) {
 
 // 3. ENDPOINT PARA REGISTRAR ORDEN DE REINICIO REMOTO (POST /api/reset-wifi)
 app.post('/api/reset-wifi', async (req, res) => {
-    loadFromDisk();
+    await loadFromCloud();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const reqChatId = (req.body.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
@@ -1896,11 +1979,18 @@ app.post('/api/reset-wifi', async (req, res) => {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
-    // CONTROL DE PERMISOS: Solo el Titular puede reiniciar/desconfigurar la placa
-    const isOwner = checkIsOwner(device, reqChatId);
+    // CONTROL DE AUTENTICACIÓN ESTRICTO: Exige Chat ID de Titular
+    if (!reqChatId) {
+        return res.status(401).json({ 
+            error: '🔒 AUTENTICACIÓN REQUERIDA: No se proporcionó identificación. Por favor abra el enlace desde su bot de Telegram como Titular para ejecutar esta acción crítica.' 
+        });
+    }
+
+    // CONTROL DE PERMISOS ESTRICTO: Solo el Titular puede reiniciar/desconfigurar la placa
+    const isOwner = checkIsOwner(device, reqChatId, true);
     if (!isOwner) {
         return res.status(403).json({ 
-            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado y no está autorizado para desconfigurar o reiniciar la red WiFi de la placa. Solo el Titular puede realizar esta acción.' 
+            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado o no está autorizado para desconfigurar o reiniciar la red WiFi de la placa. Solo el Titular puede realizar esta acción.' 
         });
     }
 
@@ -1914,22 +2004,30 @@ app.post('/api/reset-wifi', async (req, res) => {
 
 // 3.1 ENDPOINT CUANDO EL DISPOSITIVO SE DESVINCULA (POST /api/device-unlinked)
 app.post('/api/device-unlinked', async (req, res) => {
-    loadFromDisk();
+    await loadFromCloud();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
+    const reqChatId = (req.body.chatId || req.headers['x-chat-id'] || '').toString().trim();
     const device = getDevice(deviceId);
 
-    if (device) {
-        device.unlinked = true;
-        device.resetRequested = true; // Forzar reinicio WiFi si vuelve a conectarse
-        device.chatId = '';
-        device.guestChatIds = []; // Limpiar familiares
-        device.guestNames = {};
-        device.alias = deviceId; // Restablecer alias
-        if (global.aliases[deviceId]) delete global.aliases[deviceId];
-        device.blackoutNotified = false;
-        persistDevice(deviceId, device);
-        await saveToCloud();
+    if (!deviceId || !device) {
+        return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
+
+    // CONTROL DE SEGURIDAD: Solo el Titular puede desvincular el dispositivo
+    if (!reqChatId || !checkIsOwner(device, reqChatId, true)) {
+        return res.status(403).json({ error: '⛔ ACCESO DENEGADO: Solo el Titular verificado puede desvincular el dispositivo.' });
+    }
+
+    device.unlinked = true;
+    device.resetRequested = true; // Forzar reinicio WiFi si vuelve a conectarse
+    device.chatId = '';
+    device.guestChatIds = []; // Limpiar familiares
+    device.guestNames = {};
+    device.alias = deviceId; // Restablecer alias
+    if (global.aliases[deviceId]) delete global.aliases[deviceId];
+    device.blackoutNotified = false;
+    persistDevice(deviceId, device);
+    await saveToCloud();
 
     return res.json({ success: true, message: 'Dispositivo marcado como desvinculado.' });
 });
@@ -1945,11 +2043,18 @@ app.post('/api/clear-history', async (req, res) => {
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
     }
 
-    // CONTROL DE PERMISOS: Solo el Titular puede borrar el historial
-    const isOwner = checkIsOwner(device, reqChatId);
+    // CONTROL DE AUTENTICACIÓN ESTRICTO: Exige Chat ID de Titular
+    if (!reqChatId) {
+        return res.status(401).json({ 
+            error: '🔒 AUTENTICACIÓN REQUERIDA: No se proporcionó identificación. Por favor abra el enlace desde su bot de Telegram como Titular para ejecutar esta acción crítica.' 
+        });
+    }
+
+    // CONTROL DE PERMISOS ESTRICTO: Solo el Titular puede borrar el historial
+    const isOwner = checkIsOwner(device, reqChatId, true);
     if (!isOwner) {
         return res.status(403).json({ 
-            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado y no está autorizado para borrar el historial de cortes. Solo el Titular puede realizar esta acción.' 
+            error: '⛔ ACCESO DENEGADO: Usted es un Familiar Invitado o no está autorizado para borrar el historial de cortes. Solo el Titular puede realizar esta acción.' 
         });
     }
 
