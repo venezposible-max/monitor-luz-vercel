@@ -235,35 +235,34 @@ async function loadFromCloud() {
                     const cloudDev = cloudStore[id];
                     const localUpdated = (typeof localDev?.updatedAt === 'string' ? new Date(localDev.updatedAt).getTime() : localDev?.updatedAt) || 0;
                     const cloudUpdated = (typeof cloudDev?.updatedAt === 'string' ? new Date(cloudDev.updatedAt).getTime() : cloudDev?.updatedAt) || 0;
-                    const localTime = localDev ? Math.max(localDev.lastSeen || 0, localUpdated) : 0;
-                    const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudUpdated);
 
-                    const mergedGuests = Array.from(new Set([
-                        ...(cloudDev.guestChatIds || []).map(String),
-                        ...(localDev?.guestChatIds || []).map(String)
-                    ])).filter(Boolean);
+                    // Si la nube tiene configuración administrativa más reciente o igual, la nube manda
+                    const useCloudConfig = !localDev || cloudUpdated >= localUpdated;
+                    const activeGuests = useCloudConfig ? (cloudDev.guestChatIds || []) : (localDev.guestChatIds || []);
+                    const activeGuestNames = useCloudConfig ? (cloudDev.guestNames || {}) : (localDev.guestNames || {});
+                    const activeChatId = useCloudConfig ? (cloudDev.chatId || '') : (localDev.chatId || cloudDev.chatId || '');
+                    const activeConfigTime = Math.max(cloudUpdated, localUpdated);
 
-                    const mergedGuestNames = {
-                        ...(cloudDev.guestNames || {}),
-                        ...(localDev?.guestNames || {})
+                    // Para telemetría viva de la placa (lastSeen, onlineSince, history, ip)
+                    const localLastSeen = localDev?.lastSeen || 0;
+                    const cloudLastSeen = cloudDev?.lastSeen || 0;
+                    const useLocalTelemetry = localLastSeen > cloudLastSeen;
+
+                    global.persistentStore[id] = {
+                        ...(cloudDev || {}),
+                        ...(localDev || {}),
+                        alias: aliasName,
+                        chatId: activeChatId,
+                        guestChatIds: Array.from(new Set(activeGuests.map(String))).filter(Boolean),
+                        guestNames: activeGuestNames,
+                        updatedAt: activeConfigTime,
+                        lastSeen: Math.max(localLastSeen, cloudLastSeen),
+                        onlineSince: useLocalTelemetry ? (localDev.onlineSince || cloudDev.onlineSince) : (cloudDev.onlineSince || localDev?.onlineSince),
+                        history: useLocalTelemetry ? (localDev.history || cloudDev.history) : (cloudDev.history || localDev?.history),
+                        ip: useLocalTelemetry ? (localDev.ip || cloudDev.ip) : (cloudDev.ip || localDev?.ip),
+                        status: useLocalTelemetry ? (localDev.status || cloudDev.status) : (cloudDev.status || localDev?.status),
+                        blackoutNotified: useLocalTelemetry ? localDev.blackoutNotified : cloudDev.blackoutNotified
                     };
-
-                    if (!localDev || cloudTime >= localTime) {
-                        global.persistentStore[id] = {
-                            ...(localDev || {}),
-                            ...cloudDev,
-                            alias: aliasName,
-                            guestChatIds: mergedGuests,
-                            guestNames: mergedGuestNames
-                        };
-                    } else {
-                        global.persistentStore[id].alias = aliasName;
-                        global.persistentStore[id].guestChatIds = mergedGuests;
-                        global.persistentStore[id].guestNames = mergedGuestNames;
-                        if (cloudDev.chatId && !global.persistentStore[id].chatId) {
-                            global.persistentStore[id].chatId = cloudDev.chatId;
-                        }
-                    }
                 });
                 global.devices = { ...global.persistentStore };
             }
@@ -281,7 +280,7 @@ loadFromCloud().catch(err => console.error('Cloud load error:', err));
 function persistDevice(deviceId, data) {
     global.persistentStore[deviceId] = {
         ...data,
-        updatedAt: Date.now()
+        updatedAt: data.updatedAt || Date.now()
     };
     global.devices[deviceId] = global.persistentStore[deviceId];
     saveToDisk();
@@ -1158,7 +1157,7 @@ app.post('/api/ping', async (req, res) => {
         city: existing.city || '',
         region: existing.region || '',
         isp: existing.isp || '',
-        updatedAt: now
+        updatedAt: existing.updatedAt || 0
     };
 
     global.devices[deviceId] = devData;
