@@ -2323,4 +2323,9 @@ app.post('/api/p2p-alert', async (req, res) => {
     }
 });
 
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`[MONITOR LUZ] Servidor activo escuchando en el puerto ${PORT}`);
+});
+
 module.exports = app;
