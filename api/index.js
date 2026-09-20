@@ -76,11 +76,37 @@ function saveToDisk() {
     }
 }
 
-// Guardar en la nube de forma asíncrona garantizada (esperando la confirmación de Redis)
+// Guardar en la nube de forma asíncrona garantizada con fusión multi-servidor inteligente
 async function saveToCloud() {
     saveToDisk();
     if (redis) {
         try {
+            // Fusión inteligente: antes de guardar en Redis, verificar si otro servidor recibió pings más recientes
+            const cloudStoreRaw = await redis.get('global_persistent_store').catch(() => null);
+            if (cloudStoreRaw) {
+                const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
+                if (cloudStore && typeof cloudStore === 'object') {
+                    Object.keys(cloudStore).forEach(id => {
+                        const localDev = global.persistentStore[id];
+                        const cloudDev = cloudStore[id];
+                        if (!localDev) {
+                            global.persistentStore[id] = cloudDev;
+                        } else {
+                            const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudDev.updatedAt || 0);
+                            const localTime = Math.max(localDev.lastSeen || 0, localDev.updatedAt || 0);
+                            if (cloudTime > localTime) {
+                                global.persistentStore[id] = {
+                                    ...localDev,
+                                    ...cloudDev,
+                                    guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) }
+                                };
+                            }
+                        }
+                    });
+                    global.devices = { ...global.persistentStore };
+                }
+            }
+
             await Promise.all([
                 redis.set('global_aliases', JSON.stringify(global.aliases)),
                 redis.set('global_persistent_store', JSON.stringify(global.persistentStore)),
@@ -205,12 +231,24 @@ async function loadFromCloud() {
                     if (cloudStore[id].guestNames) {
                         global.guestNames = { ...global.guestNames, ...cloudStore[id].guestNames };
                     }
-                    global.persistentStore[id] = {
-                        ...(global.persistentStore[id] || {}),
-                        ...cloudStore[id],
-                        alias: aliasName,
-                        guestNames: { ...(cloudStore[id].guestNames || {}), ...(global.persistentStore[id]?.guestNames || {}) }
-                    };
+                    const localDev = global.persistentStore[id];
+                    const cloudDev = cloudStore[id];
+                    const localTime = localDev ? Math.max(localDev.lastSeen || 0, localDev.updatedAt || 0) : 0;
+                    const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudDev.updatedAt || 0);
+
+                    if (!localDev || cloudTime >= localTime) {
+                        global.persistentStore[id] = {
+                            ...(localDev || {}),
+                            ...cloudDev,
+                            alias: aliasName,
+                            guestNames: { ...(cloudDev.guestNames || {}), ...(localDev?.guestNames || {}) }
+                        };
+                    } else {
+                        global.persistentStore[id].alias = aliasName;
+                        if (cloudDev.guestNames) {
+                            global.persistentStore[id].guestNames = { ...cloudDev.guestNames, ...(localDev.guestNames || {}) };
+                        }
+                    }
                 });
                 global.devices = { ...global.persistentStore };
             }
@@ -494,6 +532,11 @@ const WEBHOOK_URL = 'https://monitor-luz-vercel-six.vercel.app/api/telegram-webh
 const REQUIRED_UPDATES = ['message', 'callback_query', 'edited_message', 'channel_post', 'edited_channel_post'];
 
 function ensureWebhookConfig() {
+    // Si estamos corriendo en Render, no interferir con el webhook de Telegram (Vercel es el master)
+    if (process.env.RENDER) {
+        console.log('[WEBHOOK-GUARD] Entorno Render detectado: Webhook delegado exclusivamente a Vercel.');
+        return;
+    }
     try {
         const getOptions = {
             hostname: 'api.telegram.org',
@@ -836,6 +879,7 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
                     ]);
                 }
             }
+            await saveToCloud();
         }
     }
 }
