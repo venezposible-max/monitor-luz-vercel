@@ -96,15 +96,33 @@ async function saveToCloud() {
                         if (!localDev) {
                             global.persistentStore[id] = cloudDev;
                         } else {
-                            const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudDev.updatedAt || 0);
-                            const localTime = Math.max(localDev.lastSeen || 0, localDev.updatedAt || 0);
-                            if (cloudTime > localTime) {
-                                global.persistentStore[id] = {
-                                    ...localDev,
-                                    ...cloudDev,
-                                    guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) }
-                                };
-                            }
+                            const cloudLastSeen = cloudDev.lastSeen || 0;
+                            const localLastSeen = localDev.lastSeen || 0;
+                            
+                            // Si la nube tiene un ping más reciente de la placa física, la nube manda
+                            const preferCloudTelemetry = cloudLastSeen > localLastSeen;
+                            
+                            const cloudUpdated = cloudDev.updatedAt || 0;
+                            const localUpdated = localDev.updatedAt || 0;
+                            const preferCloudConfig = cloudUpdated >= localUpdated;
+
+                            global.persistentStore[id] = {
+                                ...localDev,
+                                ...(preferCloudConfig ? cloudDev : {}),
+                                // Telemetría viva: el ping más reciente siempre gana
+                                lastSeen: Math.max(localLastSeen, cloudLastSeen),
+                                onlineSince: preferCloudTelemetry ? (cloudDev.onlineSince || localDev.onlineSince) : (localDev.onlineSince || cloudDev.onlineSince),
+                                blackoutNotified: preferCloudTelemetry ? cloudDev.blackoutNotified : localDev.blackoutNotified,
+                                blackoutStartTime: preferCloudTelemetry ? cloudDev.blackoutStartTime : localDev.blackoutStartTime,
+                                lastAlertMessageId: preferCloudTelemetry ? cloudDev.lastAlertMessageId : localDev.lastAlertMessageId,
+                                lastAlertMessages: { ...(cloudDev.lastAlertMessages || {}), ...(localDev.lastAlertMessages || {}) },
+                                history: preferCloudTelemetry ? (cloudDev.history || localDev.history) : (localDev.history || cloudDev.history),
+                                guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) },
+                                guestChatIds: Array.from(new Set([
+                                    ...(cloudDev.guestChatIds || []).map(String),
+                                    ...(localDev.guestChatIds || []).map(String)
+                                ])).filter(Boolean)
+                            };
                         }
                     });
                     global.devices = { ...global.persistentStore };
@@ -189,12 +207,28 @@ function loadFromDisk() {
                         global.guestNames = { ...global.guestNames, ...data[id].guestNames };
                     }
 
-                    global.persistentStore[id] = {
-                        ...(global.persistentStore[id] || {}),
-                        ...data[id],
-                        alias: global.aliases[id] || validAlias,
-                        guestNames: { ...(data[id].guestNames || {}), ...(global.persistentStore[id]?.guestNames || {}) }
-                    };
+                    const localDev = global.persistentStore[id];
+                    const diskDev = data[id];
+                    if (!diskDev) return;
+
+                    if (!localDev) {
+                        global.persistentStore[id] = {
+                            ...diskDev,
+                            alias: global.aliases[id] || validAlias,
+                            guestNames: { ...(diskDev.guestNames || {}), ...(global.persistentStore[id]?.guestNames || {}) }
+                        };
+                    } else {
+                        // NUNCA sobreescribir telemetría viva con un archivo /tmp desfasado de un contenedor previo
+                        const localTime = localDev.lastSeen || 0;
+                        const diskTime = diskDev.lastSeen || 0;
+                        if (diskTime > localTime) {
+                            global.persistentStore[id] = {
+                                ...localDev,
+                                ...diskDev,
+                                alias: global.aliases[id] || validAlias
+                            };
+                        }
+                    }
                 });
                 global.devices = { ...global.persistentStore };
             }
@@ -839,7 +873,6 @@ function buildHistoryMsg(dev, targetChatId = '') {
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
 async function checkBlackoutAlerts(excludeDeviceId = null) {
     await loadFromCloud();
-    loadFromDisk();
     const now = Date.now();
     const combined = { ...global.persistentStore, ...global.devices };
 
@@ -928,7 +961,6 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', async (req, res) => {
     await loadFromCloud();
-    loadFromDisk();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
     const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
@@ -2045,7 +2077,7 @@ app.get('/api/cron-check-blackout', (req, res) => {
 
 // 5.1 ENDPOINT CRON JOB PARA REPORTE SEMANAL DE LOS DOMINGOS A MEDIANOCHE
 app.get('/api/cron-weekly-report', async (req, res) => {
-    loadFromDisk();
+    await loadFromCloud();
     const combined = { ...global.persistentStore, ...global.devices };
     let sentCount = 0;
     const now = Date.now();
@@ -2081,7 +2113,7 @@ app.get('/api/cron-weekly-report', async (req, res) => {
 
 // 5.2 ENDPOINT CRON JOB PARA REPORTE DIARIO DE ESTABILIDAD (TODAS LAS NOCHES A LAS 9:00 PM VET / 1:00 AM UTC)
 app.get('/api/cron-daily-report', async (req, res) => {
-    loadFromDisk();
+    await loadFromCloud();
     const combined = { ...global.persistentStore, ...global.devices };
     let sentCount = 0;
     const now = Date.now();
@@ -2270,8 +2302,8 @@ app.get('/api/status/:id', async (req, res) => {
 });
 
 // 8. ENDPOINT DE SINCRONIZACIÓN PERSISTENTE BIDIRECCIONAL (POST /api/sync-history)
-app.post('/api/sync-history', (req, res) => {
-    loadFromDisk();
+app.post('/api/sync-history', async (req, res) => {
+    await loadFromCloud();
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const clientHistory = req.body.history;
 
