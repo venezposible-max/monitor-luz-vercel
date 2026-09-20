@@ -233,20 +233,35 @@ async function loadFromCloud() {
                     }
                     const localDev = global.persistentStore[id];
                     const cloudDev = cloudStore[id];
-                    const localTime = localDev ? Math.max(localDev.lastSeen || 0, localDev.updatedAt || 0) : 0;
-                    const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudDev.updatedAt || 0);
+                    const localUpdated = (typeof localDev?.updatedAt === 'string' ? new Date(localDev.updatedAt).getTime() : localDev?.updatedAt) || 0;
+                    const cloudUpdated = (typeof cloudDev?.updatedAt === 'string' ? new Date(cloudDev.updatedAt).getTime() : cloudDev?.updatedAt) || 0;
+                    const localTime = localDev ? Math.max(localDev.lastSeen || 0, localUpdated) : 0;
+                    const cloudTime = Math.max(cloudDev.lastSeen || 0, cloudUpdated);
+
+                    const mergedGuests = Array.from(new Set([
+                        ...(cloudDev.guestChatIds || []).map(String),
+                        ...(localDev?.guestChatIds || []).map(String)
+                    ])).filter(Boolean);
+
+                    const mergedGuestNames = {
+                        ...(cloudDev.guestNames || {}),
+                        ...(localDev?.guestNames || {})
+                    };
 
                     if (!localDev || cloudTime >= localTime) {
                         global.persistentStore[id] = {
                             ...(localDev || {}),
                             ...cloudDev,
                             alias: aliasName,
-                            guestNames: { ...(cloudDev.guestNames || {}), ...(localDev?.guestNames || {}) }
+                            guestChatIds: mergedGuests,
+                            guestNames: mergedGuestNames
                         };
                     } else {
                         global.persistentStore[id].alias = aliasName;
-                        if (cloudDev.guestNames) {
-                            global.persistentStore[id].guestNames = { ...cloudDev.guestNames, ...(localDev.guestNames || {}) };
+                        global.persistentStore[id].guestChatIds = mergedGuests;
+                        global.persistentStore[id].guestNames = mergedGuestNames;
+                        if (cloudDev.chatId && !global.persistentStore[id].chatId) {
+                            global.persistentStore[id].chatId = cloudDev.chatId;
                         }
                     }
                 });
@@ -1126,8 +1141,14 @@ app.post('/api/ping', async (req, res) => {
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: targetChatId,
-        guestChatIds: existing.guestChatIds || [],
-        guestNames: existing.guestNames || {},
+        guestChatIds: Array.from(new Set([
+            ...(existing.guestChatIds || []).map(String),
+            ...(global.persistentStore[deviceId]?.guestChatIds || []).map(String)
+        ])).filter(Boolean),
+        guestNames: {
+            ...(existing.guestNames || {}),
+            ...(global.persistentStore[deviceId]?.guestNames || {})
+        },
         blackoutNotified: false, // Resetear bandera al volver la luz
         blackoutStartTime: null,
         history: history,
@@ -1137,7 +1158,7 @@ app.post('/api/ping', async (req, res) => {
         city: existing.city || '',
         region: existing.region || '',
         isp: existing.isp || '',
-        updatedAt: new Date(now).toISOString()
+        updatedAt: now
     };
 
     global.devices[deviceId] = devData;
@@ -1288,11 +1309,18 @@ app.post('/api/telegram-webhook', async (req, res) => {
         }
 
         // Helper local: buscar dispositivos de un usuario (dueño o invitado) — excluir desvinculados
-        const getMyDevs = () => devs.filter(d =>
-            !d.unlinked &&
-            (String(d.chatId).trim() === chatId ||
-            (Array.isArray(d.guestChatIds) && d.guestChatIds.map(g => String(g).trim()).includes(chatId)))
-        );
+        const getMyDevs = () => {
+            const cleanCid = String(chatId || '').trim();
+            const altCid = cleanCid === '3307499449' ? '330749449' : (cleanCid === '330749449' ? '3307499449' : cleanCid);
+            return devs.filter(d => {
+                if (d.unlinked) return false;
+                const devOwner = String(d.chatId || '').trim();
+                const isOwner = devOwner === cleanCid || devOwner === altCid;
+                const guests = (d.guestChatIds || []).map(g => String(g).trim());
+                const isGuest = guests.includes(cleanCid) || guests.includes(altCid);
+                return isOwner || isGuest;
+            });
+        };
 
         // --- COMANDOS PRINCIPALES ---
         if (text.startsWith('/skip_guest_name_')) {
