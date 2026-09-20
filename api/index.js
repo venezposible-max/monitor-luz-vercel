@@ -55,9 +55,9 @@ const TMP_FILE = '/tmp/monitor-luz-devices.json';
 const ALIAS_FILE = '/tmp/monitor-luz-aliases.json';
 const GUEST_FILE = '/tmp/monitor-luz-guest-names.json';
 
-// UMBRAL UNIFICADO DE DESCONEXIÓN: 8.5 minutos (510 segundos)
-// Proporciona margen sólido contra micro-cortes de internet (Telemic/Inter/CANTV) y cold-starts de Vercel
-const OFFLINE_THRESHOLD_MS = 510000;
+// UMBRAL UNIFICADO DE DESCONEXIÓN: 5 minutos (300 segundos)
+// Detección rápida de cortes de luz y fallas de internet
+const OFFLINE_THRESHOLD_MS = 300000;
 
 // Guardar datos del dispositivo, alias y familiares en archivos /tmp y Redis en la nube
 function saveToDisk() {
@@ -884,7 +884,7 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
         let devChatId = (dev.chatId || '').toString().trim();
         if (devChatId === '3307499449') devChatId = '330749449'; // Sanitizar typo común
 
-        // Si han pasado 510 segundos (8.5 minutos de gracia sólida anti-falsos positivos de red/serverless) y no se ha notificado la ida de luz
+        // Si han pasado 300 segundos (5 minutos) y no se ha notificado la ida de luz
         if (elapsedMs >= OFFLINE_THRESHOLD_MS && !dev.blackoutNotified && devChatId) {
             dev.blackoutNotified = true;
             dev.chatId = devChatId;
