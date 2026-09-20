@@ -120,9 +120,10 @@ async function saveToCloud() {
 
 // Obtener geolocalización de una IP de forma asíncrona y no-bloqueante
 async function updateDeviceLocation(deviceId, ip) {
-    if (!ip || ip === '0.0.0.0' || ip === '127.0.0.1') return;
+    const cleanIp = String(ip || '').split(',')[0].trim();
+    if (!cleanIp || cleanIp === '0.0.0.0' || cleanIp === '127.0.0.1') return;
     try {
-        const url = `http://ip-api.com/json/${ip}?fields=status,regionName,city,isp`;
+        const url = `http://ip-api.com/json/${cleanIp}?fields=status,regionName,city,isp`;
         const http = require('http');
         http.get(url, (res) => {
             let data = '';
@@ -136,6 +137,7 @@ async function updateDeviceLocation(deviceId, ip) {
                             device.city = json.city || '';
                             device.region = json.regionName || '';
                             device.isp = json.isp || '';
+                            device.ip = cleanIp;
                             persistDevice(deviceId, device);
                             await saveToCloud();
                             console.log(`[GEO] Geolocalización exitosa para ${deviceId}: ${json.city}, ${json.regionName} (${json.isp})`);
@@ -1132,7 +1134,8 @@ app.post('/api/ping', async (req, res) => {
         }
     }
 
-    const incomingIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0';
+    const rawIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0';
+    const incomingIp = String(rawIp).split(',')[0].trim();
 
     const devData = {
         deviceId: deviceId,
