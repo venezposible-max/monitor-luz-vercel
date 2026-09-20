@@ -2265,6 +2265,10 @@ app.get('/api/p2p', async (req, res) => {
         const now = new Date();
         const timeStr = now.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
+        // Edge CDN Cache en Vercel: Cachea la respuesta 6 segundos en el CDN.
+        // Las peticiones servidas desde la caché no consumen invocaciones de función serverless en la cuota mensual.
+        res.setHeader('Cache-Control', 's-maxage=6, stale-while-revalidate=4');
+
         return res.json({
             success: true,
             updatedAt: timeStr,
