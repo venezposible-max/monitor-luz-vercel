@@ -760,6 +760,7 @@ function buildHistoryMsg(dev, targetChatId = '') {
 
 // Comprobador de cortes de luz automático (Multi-Usuario 100% Genérico para CUALQUIER ESP)
 async function checkBlackoutAlerts(excludeDeviceId = null) {
+    await loadFromCloud();
     loadFromDisk();
     const now = Date.now();
     const combined = { ...global.persistentStore, ...global.devices };
@@ -1135,8 +1136,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         if (!chatId) return res.status(200).send('OK');
 
-        // Cargar datos de Redis solo la primera vez (cold start)
-        if (!isCloudLoaded) await loadFromCloud();
+        // Cargar datos de Redis en tiempo real
+        await loadFromCloud();
 
         const cleanText = (update.message && update.message.text) ? update.message.text.trim() : text;
         const store = global.persistentStore;
@@ -2326,6 +2327,13 @@ app.post('/api/p2p-alert', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`[MONITOR LUZ] Servidor activo escuchando en el puerto ${PORT}`);
+    setInterval(async () => {
+        try {
+            await checkBlackoutAlerts();
+        } catch (e) {
+            console.error('[CRON CHECK ERROR]:', e.message);
+        }
+    }, 30000);
 });
 
 module.exports = app;
