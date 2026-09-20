@@ -251,17 +251,20 @@ async function loadFromCloud() {
                     const useLocalTelemetry = localLastSeen > cloudLastSeen;
 
                     global.persistentStore[id] = {
-                        ...(cloudDev || {}),
                         ...(localDev || {}),
+                        ...(cloudDev || {}),
                         alias: aliasName,
                         chatId: activeChatId,
+                        city: cloudDev.city || localDev?.city || '',
+                        region: cloudDev.region || localDev?.region || '',
+                        isp: cloudDev.isp || localDev?.isp || '',
                         guestChatIds: Array.from(new Set(activeGuests.map(String))).filter(Boolean),
                         guestNames: activeGuestNames,
                         updatedAt: activeConfigTime,
                         lastSeen: Math.max(localLastSeen, cloudLastSeen),
                         onlineSince: useLocalTelemetry ? (localDev.onlineSince || cloudDev.onlineSince) : (cloudDev.onlineSince || localDev?.onlineSince),
                         history: useLocalTelemetry ? (localDev.history || cloudDev.history) : (cloudDev.history || localDev?.history),
-                        ip: useLocalTelemetry ? (localDev.ip || cloudDev.ip) : (cloudDev.ip || localDev?.ip),
+                        ip: cloudDev.ip || localDev?.ip || '',
                         status: useLocalTelemetry ? (localDev.status || cloudDev.status) : (cloudDev.status || localDev?.status),
                         blackoutNotified: useLocalTelemetry ? localDev.blackoutNotified : cloudDev.blackoutNotified
                     };
@@ -1157,9 +1160,9 @@ app.post('/api/ping', async (req, res) => {
         resetRequested: false,
         unlinked: isUnlinkedNow, 
         ip: incomingIp,
-        city: existing.city || '',
-        region: existing.region || '',
-        isp: existing.isp || '',
+        city: existing.city || global.persistentStore[deviceId]?.city || '',
+        region: existing.region || global.persistentStore[deviceId]?.region || '',
+        isp: existing.isp || global.persistentStore[deviceId]?.isp || '',
         updatedAt: existing.updatedAt || 0
     };
 
