@@ -319,6 +319,9 @@
             </div>
         </div>
         <div class="brand-tagline">Monitor de Electricidad & Internet en Vivo</div>
+        <div style="margin-top: 6px;">
+            <a id="devicesNavBtn" href="/devices" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.35); color: #60a5fa; font-size: 0.75rem; font-weight: 700; padding: 5px 14px; border-radius: 99px; text-decoration: none; letter-spacing: 0.5px;">📍 Ver Todas Mis Ubicaciones</a>
+        </div>
     </div>
 
     <div id="statusCard" class="status-card state-loading">
@@ -344,8 +347,13 @@
                 <span class="info-value" id="lastReportText">--:--:--</span>
             </div>
             <div class="info-item" style="grid-column: span 2; background: rgba(59, 130, 246, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.2); margin-top: 2px;">
-                <span class="info-label" style="color: #60a5fa; font-weight: 700;">📍 Ubicación / Casa</span>
-                <span class="info-value" id="deviceAliasText" style="font-size: 1rem; color: #ffffff;">---</span>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                    <span class="info-label" style="color: #60a5fa; font-weight: 700;">📍 Ubicación / Casa</span>
+                    <span id="deviceAliasRoleBadge" style="display: none; font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.4px;"></span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="info-value" id="deviceAliasText" style="font-size: 1.05rem; color: #ffffff; font-weight: 800;">---</span>
+                </div>
             </div>
             <div class="info-item" style="grid-column: span 2; background: rgba(16, 185, 129, 0.08); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 2px;">
                 <span class="info-label" style="color: #10b981; font-weight: 700;">⏱️ Tiempo Continuo con Luz</span>
@@ -448,22 +456,39 @@
         const badgeEl = document.getElementById('userRoleBadge');
         const iconEl = document.getElementById('userRoleIcon');
         const textEl = document.getElementById('userRoleText');
-        if (!badgeEl || !iconEl || !textEl) return;
+        const aliasBadgeEl = document.getElementById('deviceAliasRoleBadge');
 
-        if (data.isOwner) {
-            badgeEl.style.display = 'inline-flex';
-            badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
-            badgeEl.style.color = '#34d399';
-            badgeEl.style.border = '1px solid rgba(16, 185, 129, 0.35)';
-            iconEl.textContent = '👑';
-            textEl.textContent = 'MODO TITULAR (ADMINISTRADOR)';
-        } else {
-            badgeEl.style.display = 'inline-flex';
-            badgeEl.style.background = 'rgba(56, 189, 248, 0.12)';
-            badgeEl.style.color = '#38bdf8';
-            badgeEl.style.border = '1px solid rgba(56, 189, 248, 0.3)';
-            iconEl.textContent = '👤';
-            textEl.textContent = 'MODO INVITADO (SOLO LECTURA)';
+        if (badgeEl && iconEl && textEl) {
+            if (data.isOwner) {
+                badgeEl.style.display = 'inline-flex';
+                badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+                badgeEl.style.color = '#34d399';
+                badgeEl.style.border = '1px solid rgba(16, 185, 129, 0.35)';
+                iconEl.textContent = '👑';
+                textEl.textContent = 'MODO TITULAR (ADMINISTRADOR)';
+            } else {
+                badgeEl.style.display = 'inline-flex';
+                badgeEl.style.background = 'rgba(56, 189, 248, 0.12)';
+                badgeEl.style.color = '#38bdf8';
+                badgeEl.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+                iconEl.textContent = '👤';
+                textEl.textContent = 'MODO INVITADO (SOLO LECTURA)';
+            }
+        }
+
+        if (aliasBadgeEl) {
+            aliasBadgeEl.style.display = 'inline-flex';
+            if (data.isOwner) {
+                aliasBadgeEl.style.background = 'rgba(245, 158, 11, 0.15)';
+                aliasBadgeEl.style.color = '#fbbf24';
+                aliasBadgeEl.style.border = '1px solid rgba(245, 158, 11, 0.35)';
+                aliasBadgeEl.textContent = '👑 Propietario';
+            } else {
+                aliasBadgeEl.style.background = 'rgba(59, 130, 246, 0.15)';
+                aliasBadgeEl.style.color = '#60a5fa';
+                aliasBadgeEl.style.border = '1px solid rgba(59, 130, 246, 0.35)';
+                aliasBadgeEl.textContent = '👤 Invitado';
+            }
         }
     }
 
@@ -476,6 +501,11 @@
             localStorage.setItem('monitor_chat_id', currentChatId);
         } else {
             currentChatId = localStorage.getItem('monitor_chat_id') || '';
+        }
+
+        const navBtn = document.getElementById('devicesNavBtn');
+        if (navBtn && currentChatId) {
+            navBtn.href = `/devices?chatId=${encodeURIComponent(currentChatId)}`;
         }
 
         if (idFromUrl && idFromUrl.trim().toUpperCase() !== 'ESP-DEMO12') {

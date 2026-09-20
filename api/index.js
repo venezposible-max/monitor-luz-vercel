@@ -725,6 +725,13 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const activeDevId = dev.deviceId || devId;
     const webLink = getWebUrl(activeDevId, targetChatId || dev.chatId);
 
+    let devOwnerId = String(dev.chatId || '').trim();
+    if (devOwnerId === '3307499449') devOwnerId = '330749449';
+    let currentCid = String(targetChatId || '').trim();
+    if (currentCid === '3307499449') currentCid = '330749449';
+    const isOwner = checkIsOwner(dev, currentCid);
+    const roleTag = isOwner ? '👑 Propietario' : '👤 Invitado';
+
     const geoInfo = (dev.city && dev.isp) ? 
         `🏢 <b>Ciudad:</b> ${dev.city}, ${dev.region || ''}\n` +
         `🌐 <b>Red:</b> ${dev.isp}\n` : '';
@@ -735,7 +742,8 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
         const m = Math.floor((up % 3600000) / 60000);
         const uptimeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
         return `🟢 <b>ESTADO EN VIVO: HAY LUZ ⚡</b>\n\n` +
-               `📍 <b>Ubicación:</b> ${name}\n` +
+               `📍 <b>Ubicación:</b> <b>${name}</b> [${roleTag}]\n` +
+               `👤 <b>Tu Rol:</b> ${isOwner ? '👑 Propietario (Titular)' : '👤 Familiar Invitado'}\n` +
                geoInfo +
                `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `⏱️ <b>Tiempo continuo con luz:</b> ${uptimeStr}\n` +
@@ -748,7 +756,8 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
         const ts = dt.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Caracas' });
         const ds = dt.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Caracas' });
         return `🔴 <b>ESTADO EN VIVO: SE FUE LA LUZ 🔌</b>\n\n` +
-               `📍 <b>Ubicación:</b> ${name}\n` +
+               `📍 <b>Ubicación:</b> <b>${name}</b> [${roleTag}]\n` +
+               `👤 <b>Tu Rol:</b> ${isOwner ? '👑 Propietario (Titular)' : '👤 Familiar Invitado'}\n` +
                geoInfo +
                `📱 <b>ID:</b> <code>${activeDevId}</code>\n` +
                `🕐 <b>Último reporte:</b> ${ts} (${ds})\n` +
@@ -763,10 +772,13 @@ function buildHistoryMsg(dev, targetChatId = '') {
     const name = dev.alias || dev.deviceId;
     const history = dev.history || [];
     const webLink = getWebUrl(dev.deviceId, targetChatId || dev.chatId);
+    const isOwner = checkIsOwner(dev, targetChatId);
+    const roleTag = isOwner ? '👑 Propietario' : '👤 Invitado';
 
     if (history.length === 0) {
         return `📜 <b>HISTORIAL DE CORTES ELÉCTRICOS</b>\n\n` +
-               `📍 <b>Ubicación:</b> <b>${name}</b>\n` +
+               `📍 <b>Ubicación:</b> <b>${name}</b> [${roleTag}]\n` +
+               `👤 <b>Tu Rol:</b> ${isOwner ? '👑 Propietario (Titular)' : '👤 Familiar Invitado'}\n` +
                `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n\n` +
                `✨ <i>No hay registros de cortes de luz almacenados. ¡El suministro ha estado estable!</i>\n\n` +
                `🔗 <b>Ver en Web:</b> ${webLink}`;
@@ -1539,7 +1551,9 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `🏠 <b>¿Cuál monitor deseas consultar?</b>`,
                     myDevs.map(d => {
                         const on = (now - d.lastSeen) < 240000;
-                        return [{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }];
+                        const isOwn = checkIsOwner(d, chatId);
+                        const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
+                        return [{ text: `${on ? '🟢' : '🔴'} ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/estado_${d.deviceId}` }];
                     })
                 );
             } else {
@@ -1559,9 +1573,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 const btns = [];
                 myDevs.forEach(d => {
                     const on = (now - d.lastSeen) < 480000;
+                    const isOwn = checkIsOwner(d, chatId);
+                    const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
                     const geoSuffix = (d.city && d.isp) ? ` <i>(${d.city} — ${d.isp})</i>` : '';
-                    txt += `• <b>${d.alias || d.deviceId}</b>${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
-                    btns.push([{ text: `📍 ${d.alias || d.deviceId}`, callback_data: `/estado_${d.deviceId}` }]);
+                    txt += `• <b>${d.alias || d.deviceId}</b> [${roleTag}]${geoSuffix}: ${on ? '🟢 HAY LUZ' : '🔴 SIN LUZ'}\n`;
+                    btns.push([{ text: `📍 ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/estado_${d.deviceId}` }]);
                 });
                 btns.push([{ text: '✏️ Cambiar Nombre', callback_data: '/renombrar' }]);
                 await sendTelegramMessage(chatId, txt, btns);
@@ -1582,7 +1598,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else if (myDevs.length > 1) {
                 await sendTelegramMessage(chatId, `📜 <b>¿De cuál monitor deseas ver el historial de cortes?</b>`,
-                    myDevs.map(d => [{ text: `📜 ${d.alias || d.deviceId}`, callback_data: `/historial_${d.deviceId}` }])
+                    myDevs.map(d => {
+                        const isOwn = checkIsOwner(d, chatId);
+                        const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
+                        return [{ text: `📜 ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/historial_${d.deviceId}` }];
+                    })
                 );
             } else {
                 await sendTelegramMessage(chatId, buildHistoryMsg(myDevs[0], chatId), [
@@ -1606,7 +1626,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados a tu Chat ID (<code>${chatId}</code>).`, []);
             } else if (myDevs.length > 1) {
                 await sendTelegramMessage(chatId, `📈 <b>¿De cuál monitor deseas generar el reporte semanal?</b>`,
-                    myDevs.map(d => [{ text: `📈 ${d.alias || d.deviceId}`, callback_data: `/reporte_${d.deviceId}` }])
+                    myDevs.map(d => {
+                        const isOwn = checkIsOwner(d, chatId);
+                        const roleTag = isOwn ? '👑 Propietario' : '👤 Invitado';
+                        return [{ text: `📈 ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/reporte_${d.deviceId}` }];
+                    })
                 );
             } else {
                 await sendTelegramMessage(chatId, buildWeeklyReport(myDevs[0], chatId) || '⚠️ Sin datos suficientes.', [
@@ -2004,18 +2028,26 @@ app.get('/api/devices-list', (req, res) => {
             if (device.unlinked || device.status === 'unlinked') return null;
 
             // Lógica de filtrado por chatId
+            let isOwner = true;
+            let isGuest = false;
             if (reqChatId) {
                 let devOwnerId = String(device.chatId || '').trim();
                 if (devOwnerId === '3307499449') devOwnerId = '330749449';
-                const guests = (device.guestChatIds || []).map(g => String(g).trim());
+                const guests = (device.guestChatIds || []).map(g => {
+                    let id = String(g).trim();
+                    return id === '3307499449' ? '330749449' : id;
+                });
 
-                const isOwner = reqChatId === devOwnerId;
-                const isGuest = guests.includes(reqChatId);
+                isOwner = checkIsOwner(device, reqChatId);
+                isGuest = guests.includes(reqChatId);
 
                 // Si no es dueño ni invitado, no se le muestra este dispositivo
                 if (!isOwner && !isGuest) {
                     return null;
                 }
+            } else {
+                isOwner = true;
+                isGuest = false;
             }
 
             const alias = global.aliases[deviceId] || device.alias || (deviceId === 'ESP-51A1B1' ? 'Apto Maracay' : deviceId);
@@ -2024,7 +2056,19 @@ app.get('/api/devices-list', (req, res) => {
             const isOnline = lastSeen && elapsedMs !== null && elapsedMs < OFFLINE_THRESHOLD_MS;
             const statusCode = isOnline ? 'online' : 'offline';
             const uptimeMs = (isOnline && device.onlineSince) ? Math.max(0, now - device.onlineSince) : 0;
-            return { deviceId, alias, lastSeen, elapsedMs, uptimeMs, statusCode, history: device.history || [] };
+            return {
+                deviceId,
+                alias,
+                lastSeen,
+                elapsedMs,
+                uptimeMs,
+                statusCode,
+                history: device.history || [],
+                isOwner,
+                isGuest: !isOwner,
+                role: isOwner ? 'propietario' : 'invitado',
+                roleLabel: isOwner ? 'Propietario' : 'Invitado'
+            };
         }).filter(Boolean);
 
         devices.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));

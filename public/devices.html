@@ -109,14 +109,14 @@ body{background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-di
 </div>
 
 <script>
+function qp(p){ return new URLSearchParams(location.search).get(p); }
 var cid = '';
 try {
-  cid = localStorage.getItem('monitor_chat_id') || '330749449';
+  cid = qp('chatId') || qp('chat_id') || qp('cid') || localStorage.getItem('monitor_chat_id') || '330749449';
+  if (cid) localStorage.setItem('monitor_chat_id', cid);
 } catch (e) {
   console.warn('localStorage no disponible:', e);
 }
-
-function qp(p){ return new URLSearchParams(location.search).get(p); }
 
 function fel(ms){
   if(!ms||ms<=0) return 'Ahora mismo';
@@ -184,12 +184,12 @@ async function load(){
       var el2=sc==='online'?fup(d.uptimeMs):fel(d.elapsedMs);
       var cuts=wkc(d.history);
       var ls=d.lastSeen?new Date(d.lastSeen).toLocaleTimeString('es-VE',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/Caracas'}):'-';
-      var isOwn=(d.role==='propietario'||d.isOwner===true||d.roleLabel==='Propietario'||(!d.role&&!d.roleLabel));
-      if(d.role==='invitado'||d.isGuest===true||d.roleLabel==='Invitado') isOwn=false;
-      var rClass=isOwn?'owner':'guest';
-      var rIcon=isOwn?'&#128081;':'&#128101;';
-      var rText=isOwn?'Propietario':'Invitado';
-      var rBadge='<span class="role-pill '+rClass+'">'+rIcon+' '+rText+'</span>';
+      var isOwn = (d.role === 'propietario' || d.role === 'owner' || d.isOwner === true || d.roleLabel === 'Propietario' || d.roleLabel === 'Titular');
+      if (d.role === 'invitado' || d.role === 'guest' || d.isGuest === true || d.roleLabel === 'Invitado' || d.roleLabel === 'Familiar Invitado') isOwn = false;
+      var rClass = isOwn ? 'owner' : 'guest';
+      var rIcon = isOwn ? '👑' : '👤';
+      var rText = isOwn ? 'Propietario' : 'Invitado';
+      var rBadge = '<span class="role-pill ' + rClass + '">' + rIcon + ' ' + rText + '</span>';
 
       html+='<a class="dcard '+sc+'" href="'+url+'">';
       html+='<div class="dhead"><div class="dalias"><span class="dot '+sc+'"></span><span>'+al+'</span> '+rBadge+'</div>';
