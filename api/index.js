@@ -2438,12 +2438,14 @@ app.get('/api/ota/status', async (req, res) => {
 
 // 13. ENDPOINT PROXY PARA BINANCE P2P (VES / USDT)
 app.get('/api/p2p', async (req, res) => {
-    try {
-        const tradeType = (req.query.tradeType || 'BUY').toUpperCase();
-        const payType = req.query.payType || '';
-        const transAmount = req.query.transAmount || '';
-        const rows = parseInt(req.query.rows || '15', 10);
+    const tradeType = (req.query.tradeType || 'BUY').toUpperCase();
+    const payType = req.query.payType || '';
+    const transAmount = req.query.transAmount || '';
+    const cacheKey = `${tradeType}_${payType}_${transAmount}`;
+    global.p2pCache = global.p2pCache || {};
 
+    try {
+        const rows = parseInt(req.query.rows || '15', 10);
         const payTypes = (payType && payType !== 'ALL') ? [payType] : [];
 
         const payload = {
@@ -2458,21 +2460,33 @@ app.get('/api/p2p', async (req, res) => {
             transAmount: transAmount ? String(transAmount) : undefined
         };
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
         const binanceRes = await fetch('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', {
             method: 'POST',
+            signal: controller.signal,
             headers: {
                 'Content-Type': 'application/json',
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
             body: JSON.stringify(payload)
-        });
+        }).finally(() => clearTimeout(timeoutId));
 
         if (!binanceRes.ok) {
+            if (global.p2pCache[cacheKey]) {
+                console.log(`[P2P] Binance devolvió status ${binanceRes.status}. Sirviendo caché de respaldo.`);
+                return res.json(global.p2pCache[cacheKey]);
+            }
             return res.status(502).json({ success: false, error: 'Binance P2P error: ' + binanceRes.status });
         }
 
         const data = await binanceRes.json();
         const rawAds = (data && data.data) ? data.data : [];
+
+        if (rawAds.length === 0 && global.p2pCache[cacheKey]) {
+            return res.json(global.p2pCache[cacheKey]);
+        }
 
         const ads = rawAds.map(item => {
             const adv = item.adv || {};
@@ -2496,17 +2510,25 @@ app.get('/api/p2p', async (req, res) => {
         const timeStr = now.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
 
         // Edge CDN Cache en Vercel: Cachea la respuesta 6 segundos en el CDN.
-        // Las peticiones servidas desde la caché no consumen invocaciones de función serverless en la cuota mensual.
         res.setHeader('Cache-Control', 's-maxage=6, stale-while-revalidate=4');
 
-        return res.json({
+        const responseObj = {
             success: true,
             updatedAt: timeStr,
             total: ads.length,
             ads: ads
-        });
+        };
+
+        // Guardar en caché viva de respaldo
+        global.p2pCache[cacheKey] = responseObj;
+
+        return res.json(responseObj);
     } catch (e) {
         console.error('[P2P PROXY ERROR]:', e.message);
+        if (global.p2pCache && global.p2pCache[cacheKey]) {
+            console.log('[P2P] Excepción en fetch Binance. Sirviendo caché de respaldo.');
+            return res.json(global.p2pCache[cacheKey]);
+        }
         return res.status(500).json({ success: false, error: e.message });
     }
 });
