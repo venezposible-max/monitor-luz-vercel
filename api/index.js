@@ -104,13 +104,41 @@ async function saveToCloud(force = false) {
                         // Si la nube tiene un ping más reciente de la placa física, la nube manda
                         const preferCloudTelemetry = cloudLastSeen > localLastSeen;
                         
-                        const cloudUpdated = cloudDev.updatedAt || 0;
-                        const localUpdated = localDev.updatedAt || 0;
-                        const preferCloudConfig = cloudUpdated >= localUpdated;
+                        const cloudUpdated = (typeof cloudDev?.updatedAt === 'string' ? new Date(cloudDev.updatedAt).getTime() : cloudDev?.updatedAt) || 0;
+                        const localUpdated = (typeof localDev?.updatedAt === 'string' ? new Date(localDev.updatedAt).getTime() : localDev?.updatedAt) || 0;
+                        const preferCloudConfig = cloudUpdated > localUpdated;
+                        const preferLocalConfig = localUpdated > cloudUpdated;
+
+                        // Si una instancia realizó una acción administrativa explícita (añadir/quitar familiar, renombrar),
+                        // la de mayor timestamp manda. Si son iguales (pings rutinarios), se unen conservadoramente.
+                        const activeGuests = preferLocalConfig
+                            ? (localDev.guestChatIds || [])
+                            : preferCloudConfig
+                                ? (cloudDev.guestChatIds || [])
+                                : Array.from(new Set([
+                                    ...(cloudDev.guestChatIds || []).map(String),
+                                    ...(localDev.guestChatIds || []).map(String)
+                                ])).filter(Boolean);
+
+                        const activeGuestNames = preferLocalConfig
+                            ? (localDev.guestNames || {})
+                            : preferCloudConfig
+                                ? (cloudDev.guestNames || {})
+                                : { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) };
+
+                        const activeAlias = preferLocalConfig
+                            ? (localDev.alias || cloudDev.alias)
+                            : (cloudDev.alias || localDev.alias);
+
+                        const activeChatId = preferLocalConfig
+                            ? (localDev.chatId || cloudDev.chatId)
+                            : (cloudDev.chatId || localDev.chatId);
 
                         global.persistentStore[id] = {
                             ...localDev,
                             ...(preferCloudConfig ? cloudDev : {}),
+                            alias: activeAlias,
+                            chatId: activeChatId,
                             // Telemetría viva: el ping más reciente siempre gana
                             lastSeen: Math.max(localLastSeen, cloudLastSeen),
                             onlineSince: preferCloudTelemetry ? (cloudDev.onlineSince || localDev.onlineSince) : (localDev.onlineSince || cloudDev.onlineSince),
@@ -119,11 +147,9 @@ async function saveToCloud(force = false) {
                             lastAlertMessageId: preferCloudTelemetry ? cloudDev.lastAlertMessageId : localDev.lastAlertMessageId,
                             lastAlertMessages: { ...(cloudDev.lastAlertMessages || {}), ...(localDev.lastAlertMessages || {}) },
                             history: preferCloudTelemetry ? (cloudDev.history || localDev.history) : (localDev.history || cloudDev.history),
-                            guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) },
-                            guestChatIds: Array.from(new Set([
-                                ...(cloudDev.guestChatIds || []).map(String),
-                                ...(localDev.guestChatIds || []).map(String)
-                            ])).filter(Boolean)
+                            guestNames: activeGuestNames,
+                            guestChatIds: activeGuests,
+                            updatedAt: Math.max(cloudUpdated, localUpdated)
                         };
                     }
                 });
@@ -288,11 +314,32 @@ async function loadFromCloud(force = false) {
                     const localUpdated = (typeof localDev?.updatedAt === 'string' ? new Date(localDev.updatedAt).getTime() : localDev?.updatedAt) || 0;
                     const cloudUpdated = (typeof cloudDev?.updatedAt === 'string' ? new Date(cloudDev.updatedAt).getTime() : cloudDev?.updatedAt) || 0;
 
-                    // Si la nube tiene configuración administrativa más reciente o igual, la nube manda
-                    const useCloudConfig = !localDev || cloudUpdated >= localUpdated;
-                    const activeGuests = useCloudConfig ? (cloudDev.guestChatIds || []) : (localDev.guestChatIds || []);
-                    const activeGuestNames = useCloudConfig ? (cloudDev.guestNames || {}) : (localDev.guestNames || {});
-                    const activeChatId = useCloudConfig ? (cloudDev.chatId || '') : (localDev.chatId || cloudDev.chatId || '');
+                    const preferCloudConfig = cloudUpdated > localUpdated;
+                    const preferLocalConfig = localUpdated > cloudUpdated;
+
+                    const activeGuests = preferLocalConfig
+                        ? (localDev.guestChatIds || [])
+                        : preferCloudConfig
+                            ? (cloudDev.guestChatIds || [])
+                            : Array.from(new Set([
+                                ...(cloudDev.guestChatIds || []).map(String),
+                                ...(localDev?.guestChatIds || []).map(String)
+                            ])).filter(Boolean);
+
+                    const activeGuestNames = preferLocalConfig
+                        ? (localDev.guestNames || {})
+                        : preferCloudConfig
+                            ? (cloudDev.guestNames || {})
+                            : { ...(cloudDev.guestNames || {}), ...(localDev?.guestNames || {}) };
+
+                    const activeChatId = preferLocalConfig
+                        ? (localDev.chatId || cloudDev.chatId || '')
+                        : (cloudDev.chatId || localDev?.chatId || '');
+
+                    const activeAlias = preferLocalConfig
+                        ? (localDev.alias || aliasName)
+                        : (aliasName || localDev?.alias);
+
                     const activeConfigTime = Math.max(cloudUpdated, localUpdated);
 
                     // Para telemetría viva de la placa (lastSeen, onlineSince, history, ip)
@@ -303,12 +350,12 @@ async function loadFromCloud(force = false) {
                     global.persistentStore[id] = {
                         ...(localDev || {}),
                         ...(cloudDev || {}),
-                        alias: aliasName,
+                        alias: activeAlias,
                         chatId: activeChatId,
                         city: cloudDev.city || localDev?.city || '',
                         region: cloudDev.region || localDev?.region || '',
                         isp: cloudDev.isp || localDev?.isp || '',
-                        guestChatIds: Array.from(new Set(activeGuests.map(String))).filter(Boolean),
+                        guestChatIds: activeGuests,
                         guestNames: activeGuestNames,
                         updatedAt: activeConfigTime,
                         lastSeen: Math.max(localLastSeen, cloudLastSeen),
@@ -334,9 +381,10 @@ loadFromDisk();
 loadFromCloud().catch(err => console.error('Cloud load error:', err));
 
 function persistDevice(deviceId, data) {
+    const prev = global.persistentStore[deviceId] || {};
     global.persistentStore[deviceId] = {
         ...data,
-        updatedAt: data.updatedAt || Date.now()
+        updatedAt: data.updatedAt !== undefined ? data.updatedAt : (prev.updatedAt || 0)
     };
     global.devices[deviceId] = global.persistentStore[deviceId];
     saveToDisk();
@@ -378,6 +426,7 @@ function setGuestName(deviceId, guestChatId, name) {
     if (dev) {
         dev.guestNames = dev.guestNames || {};
         dev.guestNames[cid] = cleanName;
+        dev.updatedAt = Date.now();
         persistDevice(deviceId, dev);
     }
     saveToDisk();
@@ -985,7 +1034,11 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
 
 // 1. ENDPOINT PARA RECIBIR PING DE LA PLACA ESP8266 (POST /api/ping)
 app.post('/api/ping', async (req, res) => {
-    await loadFromCloud();
+    if (!isCloudLoaded) {
+        await loadFromCloud(true);
+    } else {
+        await loadFromCloud(false);
+    }
     const deviceId = (req.body.deviceId || req.body.id || '').toString().trim().toUpperCase();
     const boardUptimeMs = parseInt(req.body.uptimeMs || 0, 10);
     const chatId = (req.body.chatId || req.body.telegramChatId || '').toString().trim();
@@ -1167,20 +1220,22 @@ app.post('/api/ping', async (req, res) => {
     const rawIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '0.0.0.0';
     const incomingIp = String(rawIp).split(',')[0].trim();
 
+    const existingGuests = (existing.guestChatIds && existing.guestChatIds.length > 0)
+        ? existing.guestChatIds
+        : (global.persistentStore[deviceId]?.guestChatIds || []);
+
+    const existingGuestNames = (existing.guestNames && Object.keys(existing.guestNames).length > 0)
+        ? existing.guestNames
+        : (global.persistentStore[deviceId]?.guestNames || {});
+
     const devData = {
         deviceId: deviceId,
         alias: deviceAlias,
         lastSeen: now,
         onlineSince: onlineSince,
         chatId: targetChatId,
-        guestChatIds: Array.from(new Set([
-            ...(existing.guestChatIds || []).map(String),
-            ...(global.persistentStore[deviceId]?.guestChatIds || []).map(String)
-        ])).filter(Boolean),
-        guestNames: {
-            ...(existing.guestNames || {}),
-            ...(global.persistentStore[deviceId]?.guestNames || {})
-        },
+        guestChatIds: Array.from(new Set(existingGuests.map(String))).filter(Boolean),
+        guestNames: { ...existingGuestNames },
         blackoutNotified: false, // Resetear bandera al volver la luz
         blackoutStartTime: null,
         lastAlertMessageId: null,
@@ -1192,7 +1247,7 @@ app.post('/api/ping', async (req, res) => {
         city: existing.city || global.persistentStore[deviceId]?.city || '',
         region: existing.region || global.persistentStore[deviceId]?.region || '',
         isp: existing.isp || global.persistentStore[deviceId]?.isp || '',
-        updatedAt: existing.updatedAt || 0
+        updatedAt: existing.updatedAt || global.persistentStore[deviceId]?.updatedAt || 0
     };
 
     global.devices[deviceId] = devData;
@@ -1223,7 +1278,11 @@ app.post('/api/ping', async (req, res) => {
 
 // 2. ENDPOINT WEBHOOK TELEGRAM — CORRECTO: procesar y enviar respuesta PRIMERO, luego 200 OK
 app.post('/api/telegram-webhook', async (req, res) => {
-    await loadFromCloud();
+    if (!isCloudLoaded) {
+        await loadFromCloud(true);
+    } else {
+        await loadFromCloud(false);
+    }
     try {
         const update = req.body;
         if (!update) return res.status(200).send('OK');
@@ -1250,7 +1309,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
         if (chatId === '3307499449') chatId = '330749449';
 
         // Cargar datos de Redis en tiempo real
-        await loadFromCloud();
+        await loadFromCloud(false);
 
         const cleanText = (update.message && update.message.text) ? update.message.text.trim() : text;
         const store = global.persistentStore;
@@ -1280,6 +1339,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             if (!existingDev.guestChatIds.includes(guestChatId)) {
                 existingDev.guestChatIds.push(guestChatId);
             }
+            existingDev.updatedAt = Date.now();
             persistDevice(devId, existingDev);
             await saveToCloud(true);
 
@@ -1557,6 +1617,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 if (dev.guestNames && dev.guestNames[targetGuestId]) {
                     delete dev.guestNames[targetGuestId];
                 }
+                dev.updatedAt = Date.now();
                 persistDevice(devId, dev);
                 await saveToCloud(true);
 
@@ -1593,6 +1654,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 const prevGuests = [...(dev.guestChatIds || [])];
                 dev.guestChatIds = [];
                 dev.guestNames = {};
+                dev.updatedAt = Date.now();
                 persistDevice(devId, dev);
                 await saveToCloud(true);
 
