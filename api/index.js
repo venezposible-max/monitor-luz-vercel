@@ -59,7 +59,7 @@ const GUEST_FILE = '/tmp/monitor-luz-guest-names.json';
 // Detección rápida de cortes de luz y fallas de internet
 const OFFLINE_THRESHOLD_MS = 300000;
 
-// Guardar datos del dispositivo, alias y familiares en archivos /tmp y Redis en la nube
+// Guardar datos del dispositivo, alias y familiares en archivos locales /tmp (gratis, instantáneo)
 function saveToDisk() {
     try {
         fs.writeFileSync(TMP_FILE, JSON.stringify(global.persistentStore), 'utf8');
@@ -67,16 +67,6 @@ function saveToDisk() {
         fs.writeFileSync(GUEST_FILE, JSON.stringify(global.guestNames), 'utf8');
     } catch (e) {
         console.error('Error guardando en /tmp:', e.message);
-    }
-
-    if (redis) {
-        try {
-            redis.set('global_aliases', JSON.stringify(global.aliases)).catch(err => console.error('[REDIS ALIAS SAVE ERROR]:', err.message));
-            redis.set('global_persistent_store', JSON.stringify(global.persistentStore)).catch(err => console.error('[REDIS STORE SAVE ERROR]:', err.message));
-            redis.set('global_guest_names', JSON.stringify(global.guestNames)).catch(err => console.error('[REDIS GUESTS SAVE ERROR]:', err.message));
-        } catch (e) {
-            console.error('[REDIS SAVE ERROR]:', e.message);
-        }
     }
 }
 
