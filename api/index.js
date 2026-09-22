@@ -80,63 +80,75 @@ function saveToDisk() {
     }
 }
 
-// Guardar en la nube de forma asíncrona garantizada con fusión multi-servidor inteligente
-async function saveToCloud() {
-    saveToDisk();
-    if (redis) {
-        try {
-            // Fusión inteligente: antes de guardar en Redis, verificar si otro servidor recibió pings más recientes
-            const cloudStoreRaw = await redis.get('global_persistent_store').catch(() => null);
-            if (cloudStoreRaw) {
-                const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
-                if (cloudStore && typeof cloudStore === 'object') {
-                    Object.keys(cloudStore).forEach(id => {
-                        const localDev = global.persistentStore[id];
-                        const cloudDev = cloudStore[id];
-                        if (!localDev) {
-                            global.persistentStore[id] = cloudDev;
-                        } else {
-                            const cloudLastSeen = cloudDev.lastSeen || 0;
-                            const localLastSeen = localDev.lastSeen || 0;
-                            
-                            // Si la nube tiene un ping más reciente de la placa física, la nube manda
-                            const preferCloudTelemetry = cloudLastSeen > localLastSeen;
-                            
-                            const cloudUpdated = cloudDev.updatedAt || 0;
-                            const localUpdated = localDev.updatedAt || 0;
-                            const preferCloudConfig = cloudUpdated >= localUpdated;
+// Guardar en la nube con throttle inteligente para ahorrar peticiones Redis
+// force=true: escritura inmediata (eventos críticos: cortes, regresos, comandos admin)
+// force=false: escritura throttleada cada 60s (pings rutinarios de telemetría)
+let lastCloudSaveTime = 0;
+const CLOUD_SAVE_THROTTLE_MS = 60000; // 60 segundos entre escrituras rutinarias a Redis
 
-                            global.persistentStore[id] = {
-                                ...localDev,
-                                ...(preferCloudConfig ? cloudDev : {}),
-                                // Telemetría viva: el ping más reciente siempre gana
-                                lastSeen: Math.max(localLastSeen, cloudLastSeen),
-                                onlineSince: preferCloudTelemetry ? (cloudDev.onlineSince || localDev.onlineSince) : (localDev.onlineSince || cloudDev.onlineSince),
-                                blackoutNotified: preferCloudTelemetry ? cloudDev.blackoutNotified : localDev.blackoutNotified,
-                                blackoutStartTime: preferCloudTelemetry ? cloudDev.blackoutStartTime : localDev.blackoutStartTime,
-                                lastAlertMessageId: preferCloudTelemetry ? cloudDev.lastAlertMessageId : localDev.lastAlertMessageId,
-                                lastAlertMessages: { ...(cloudDev.lastAlertMessages || {}), ...(localDev.lastAlertMessages || {}) },
-                                history: preferCloudTelemetry ? (cloudDev.history || localDev.history) : (localDev.history || cloudDev.history),
-                                guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) },
-                                guestChatIds: Array.from(new Set([
-                                    ...(cloudDev.guestChatIds || []).map(String),
-                                    ...(localDev.guestChatIds || []).map(String)
-                                ])).filter(Boolean)
-                            };
-                        }
-                    });
-                    global.devices = { ...global.persistentStore };
-                }
+async function saveToCloud(force = false) {
+    saveToDisk(); // Siempre guardar en /tmp local (gratis, instantáneo)
+
+    if (!redis) return;
+
+    const now = Date.now();
+    if (!force && (now - lastCloudSaveTime) < CLOUD_SAVE_THROTTLE_MS) {
+        return; // Omitir escritura rutinaria a Redis si no han pasado 60s
+    }
+
+    try {
+        // Fusión inteligente: antes de guardar en Redis, verificar si otro servidor recibió pings más recientes
+        const cloudStoreRaw = await redis.get('global_persistent_store').catch(() => null);
+        if (cloudStoreRaw) {
+            const cloudStore = typeof cloudStoreRaw === 'string' ? JSON.parse(cloudStoreRaw) : cloudStoreRaw;
+            if (cloudStore && typeof cloudStore === 'object') {
+                Object.keys(cloudStore).forEach(id => {
+                    const localDev = global.persistentStore[id];
+                    const cloudDev = cloudStore[id];
+                    if (!localDev) {
+                        global.persistentStore[id] = cloudDev;
+                    } else {
+                        const cloudLastSeen = cloudDev.lastSeen || 0;
+                        const localLastSeen = localDev.lastSeen || 0;
+                        
+                        // Si la nube tiene un ping más reciente de la placa física, la nube manda
+                        const preferCloudTelemetry = cloudLastSeen > localLastSeen;
+                        
+                        const cloudUpdated = cloudDev.updatedAt || 0;
+                        const localUpdated = localDev.updatedAt || 0;
+                        const preferCloudConfig = cloudUpdated >= localUpdated;
+
+                        global.persistentStore[id] = {
+                            ...localDev,
+                            ...(preferCloudConfig ? cloudDev : {}),
+                            // Telemetría viva: el ping más reciente siempre gana
+                            lastSeen: Math.max(localLastSeen, cloudLastSeen),
+                            onlineSince: preferCloudTelemetry ? (cloudDev.onlineSince || localDev.onlineSince) : (localDev.onlineSince || cloudDev.onlineSince),
+                            blackoutNotified: preferCloudTelemetry ? cloudDev.blackoutNotified : localDev.blackoutNotified,
+                            blackoutStartTime: preferCloudTelemetry ? cloudDev.blackoutStartTime : localDev.blackoutStartTime,
+                            lastAlertMessageId: preferCloudTelemetry ? cloudDev.lastAlertMessageId : localDev.lastAlertMessageId,
+                            lastAlertMessages: { ...(cloudDev.lastAlertMessages || {}), ...(localDev.lastAlertMessages || {}) },
+                            history: preferCloudTelemetry ? (cloudDev.history || localDev.history) : (localDev.history || cloudDev.history),
+                            guestNames: { ...(cloudDev.guestNames || {}), ...(localDev.guestNames || {}) },
+                            guestChatIds: Array.from(new Set([
+                                ...(cloudDev.guestChatIds || []).map(String),
+                                ...(localDev.guestChatIds || []).map(String)
+                            ])).filter(Boolean)
+                        };
+                    }
+                });
+                global.devices = { ...global.persistentStore };
             }
-
-            await Promise.all([
-                redis.set('global_aliases', JSON.stringify(global.aliases)),
-                redis.set('global_persistent_store', JSON.stringify(global.persistentStore)),
-                redis.set('global_guest_names', JSON.stringify(global.guestNames))
-            ]);
-        } catch (e) {
-            console.error('[REDIS SYNC ERROR]:', e.message);
         }
+
+        await Promise.all([
+            redis.set('global_aliases', JSON.stringify(global.aliases)),
+            redis.set('global_persistent_store', JSON.stringify(global.persistentStore)),
+            redis.set('global_guest_names', JSON.stringify(global.guestNames))
+        ]);
+        lastCloudSaveTime = Date.now();
+    } catch (e) {
+        console.error('[REDIS SYNC ERROR]:', e.message);
     }
 }
 
@@ -161,7 +173,7 @@ async function updateDeviceLocation(deviceId, ip) {
                             device.isp = json.isp || '';
                             device.ip = cleanIp;
                             persistDevice(deviceId, device);
-                            await saveToCloud();
+                            await saveToCloud(true);
                             console.log(`[GEO] Geolocalización exitosa para ${deviceId}: ${json.city}, ${json.regionName} (${json.isp})`);
                         }
                     }
@@ -238,10 +250,20 @@ function loadFromDisk() {
     }
 }
 
-// Cargar datos de la nube (Upstash Redis) al arrancar la lambda
+// Cargar datos de la nube (Upstash Redis) al arrancar la lambda, con throttle para ahorrar peticiones
 let isCloudLoaded = false;
-async function loadFromCloud() {
+let lastCloudLoadTime = 0;
+const CLOUD_LOAD_THROTTLE_MS = 60000; // 60 segundos entre lecturas rutinarias de Redis
+
+async function loadFromCloud(force = false) {
     if (!redis) return;
+
+    // Si ya cargamos recientemente y no es forzado, omitir lectura de Redis
+    const now = Date.now();
+    if (isCloudLoaded && !force && (now - lastCloudLoadTime) < CLOUD_LOAD_THROTTLE_MS) {
+        return;
+    }
+
     try {
         const [cloudAliasesRaw, cloudStoreRaw, cloudGuestsRaw] = await Promise.all([
             redis.get('global_aliases'),
@@ -311,6 +333,7 @@ async function loadFromCloud() {
             }
         }
         isCloudLoaded = true;
+        lastCloudLoadTime = Date.now();
     } catch (e) {
         console.error('[REDIS LOAD ERROR]:', e.message);
     }
@@ -965,7 +988,7 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
                 lastAlertMessages: dev.lastAlertMessages,
                 history: dev.history
             });
-            await saveToCloud();
+            await saveToCloud(true);
         }
     }
 }
@@ -1194,7 +1217,8 @@ app.post('/api/ping', async (req, res) => {
 
     console.log(`[PING] Dispositivo ${deviceId} activo.`);
 
-    await saveToCloud();
+    // Si regresa de un corte/apagón, forzar guardado inmediato en Redis
+    await saveToCloud(Boolean(isReturnFromBlackout));
     await checkBlackoutAlerts(deviceId);
 
     return res.json({ 
@@ -1267,7 +1291,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 existingDev.guestChatIds.push(guestChatId);
             }
             persistDevice(devId, existingDev);
-            await saveToCloud();
+            await saveToCloud(true);
 
             // Avanzar automáticamente a Paso 2: Pedir Nombre
             await setPendingState(chatId, {
@@ -1299,7 +1323,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             }
 
             setGuestName(devId, guestChatId, guestName);
-            await saveToCloud();
+            await saveToCloud(true);
 
             await sendTelegramMessage(chatId,
                 `🎉 <b>¡Familiar configurado con éxito!</b>\n\n` +
@@ -1338,7 +1362,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             existingDev.alias = cleanText;
             existingDev.chatId = existingDev.chatId || chatId;
             persistDevice(renameDevId, existingDev);
-            await saveToCloud();
+            await saveToCloud(true);
             await sendTelegramMessage(chatId,
                 `✅ <b>¡Nombre asignado!</b>\n\n📍 <b>${cleanText}</b> (<code>${renameDevId}</code>)`,
                 [[{ text: '📊 Ver Estado', callback_data: `/estado_${renameDevId}` }],
@@ -1544,7 +1568,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                     delete dev.guestNames[targetGuestId];
                 }
                 persistDevice(devId, dev);
-                await saveToCloud();
+                await saveToCloud(true);
 
                 await sendTelegramMessage(chatId,
                     `✅ <b>Familiar eliminado con éxito:</b>\n\n` +
@@ -1580,7 +1604,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
                 dev.guestChatIds = [];
                 dev.guestNames = {};
                 persistDevice(devId, dev);
-                await saveToCloud();
+                await saveToCloud(true);
 
                 await sendTelegramMessage(chatId,
                     `✅ <b>Todos los familiares de <code>${dev.alias || devId}</code> han sido eliminados.</b>\n\n` +
@@ -1838,7 +1862,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
             } else {
                 if (global.persistentStore[myDev.deviceId]) global.persistentStore[myDev.deviceId].resetRequested = true;
                 if (global.devices[myDev.deviceId]) global.devices[myDev.deviceId].resetRequested = true;
-                await saveToCloud();
+                await saveToCloud(true);
                 await sendTelegramMessage(chatId,
                     `✅ <b>¡Orden de reinicio enviada a la placa!</b>\n\n` +
                     `📱 <b>Dispositivo:</b> <code>${myDev.deviceId}</code>\n\n` +
@@ -2013,7 +2037,7 @@ app.post('/api/reset-wifi', async (req, res) => {
     device.resetRequested = true;
     device.unlinked = true;
     persistDevice(deviceId, device);
-    await saveToCloud();
+    await saveToCloud(true);
 
     return res.json({ success: true, message: 'Orden de reinicio registrada por el Titular.' });
 });
@@ -2043,7 +2067,7 @@ app.post('/api/device-unlinked', async (req, res) => {
     if (global.aliases[deviceId]) delete global.aliases[deviceId];
     device.blackoutNotified = false;
     persistDevice(deviceId, device);
-    await saveToCloud();
+    await saveToCloud(true);
 
     return res.json({ success: true, message: 'Dispositivo marcado como desvinculado.' });
 });
@@ -2076,7 +2100,7 @@ app.post('/api/clear-history', async (req, res) => {
 
     device.history = [];
     persistDevice(deviceId, device);
-    await saveToCloud();
+    await saveToCloud(true);
 
     return res.json({ success: true, message: `Historial de ${deviceId} borrado exitosamente por el Titular.` });
 });
