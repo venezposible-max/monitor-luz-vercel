@@ -28,8 +28,8 @@ const { Redis } = require('@upstash/redis');
 
 // Inicializar cliente de Redis (Upstash) con fallback seguro
 let redis = null;
-const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || 'https://composed-heron-94035.upstash.io';
-const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || 'gQAAAAAAAW9TAAIgcDJjOWY1YjBiMDg1NDE0NTU5OGM2MTJhMjllZjc4MGY0Yw';
+const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || 'https://probable-seal-289895.upstash.io';
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || 'gQAAAAAABGxnAAIgcDJhNDYzNDcwOTg5NTQ0NGMyODk2MmFlZGU0NjNiM2ZiOA';
 
 if (redisUrl && redisToken) {
     try {
