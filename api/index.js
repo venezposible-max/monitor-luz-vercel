@@ -912,34 +912,46 @@ async function checkBlackoutAlerts(excludeDeviceId = null) {
                 });
             }
 
-            const geoSuffix = (dev.city && dev.isp) ? ` <i>(${dev.city}, ${dev.region || ''} — ${dev.isp} 🌐)</i>` : '';
-            const alertMsg = `⚠️ <b>¡ALERTA DE DESCONEXIÓN! 🔌🌐</b>\n\n` +
-                             `📍 <b>Ubicación:</b> <code>${dev.alias || dev.deviceId}</code>${geoSuffix}\n` +
-                             `⏰ <b>Hora aproximada del evento:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
-                             `Tu dispositivo ha dejado de transmitir señal.\n` +
-                             `💡 <i>Esto puede deberse a:</i>\n` +
-                             `  1️⃣ <b>Corte de Energía Eléctrica (Falla de luz)</b>\n` +
-                             `  2️⃣ <b>Caída del Servicio de Internet (CANTV/Fibra)</b>\n` +
-                             `  3️⃣ <b>O ambos eventos simultáneamente</b>\n\n` +
-                             `🔍 <i>La causa exacta se determinará y confirmará automáticamente en tu reporte al restablecerse la conexión.</i>\n\n` +
-                             `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
-                             `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
+            // FILTRO ANTI-ALERTAS DESFASADAS:
+            // Si el servidor estuvo dormido por apagón general o inactividad y la desconexión
+            // ocurrió hace más de 25 minutos, registramos el corte en el historial pero
+            // NO enviamos una alerta tardía y confusa a Telegram como si acabara de ocurrir.
+            const MAX_ALERT_DISPATCH_DELAY_MS = 25 * 60 * 1000; // 25 minutos máximo de tolerancia
+            const isTooOldForAlert = elapsedMs > MAX_ALERT_DISPATCH_DELAY_MS;
 
-            console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${devChatId} para ${dev.deviceId}`);
-            const sendRes = await sendTelegramMessage(devChatId, alertMsg);
-            const msgId = sendRes?.messageId || null;
-            dev.lastAlertMessageId = msgId;
-            if (msgId) dev.lastAlertMessages[devChatId] = msgId;
+            let msgId = null;
+            if (isTooOldForAlert) {
+                console.log(`[ALERTA CORTE OMITIDA] Desconexión de ${dev.deviceId} ocurrió hace ${Math.round(elapsedMs / 60000)} min. Se omite notificación tardía de Telegram para evitar reportes desfasados.`);
+            } else {
+                const geoSuffix = (dev.city && dev.isp) ? ` <i>(${dev.city}, ${dev.region || ''} — ${dev.isp} 🌐)</i>` : '';
+                const alertMsg = `⚠️ <b>¡ALERTA DE DESCONEXIÓN! 🔌🌐</b>\n\n` +
+                                 `📍 <b>Ubicación:</b> <code>${dev.alias || dev.deviceId}</code>${geoSuffix}\n` +
+                                 `⏰ <b>Hora aproximada del evento:</b> ${cutoffTimeStr} (${cutoffDateStr})\n\n` +
+                                 `Tu dispositivo ha dejado de transmitir señal.\n` +
+                                 `💡 <i>Esto puede deberse a:</i>\n` +
+                                 `  1️⃣ <b>Corte de Energía Eléctrica (Falla de luz)</b>\n` +
+                                 `  2️⃣ <b>Caída del Servicio de Internet (CANTV/Fibra)</b>\n` +
+                                 `  3️⃣ <b>O ambos eventos simultáneamente</b>\n\n` +
+                                 `🔍 <i>La causa exacta se determinará y confirmará automáticamente en tu reporte al restablecerse la conexión.</i>\n\n` +
+                                 `📱 <b>Dispositivo:</b> <code>${dev.deviceId}</code>\n` +
+                                 `🔗 <b>Monitor Web:</b> https://monitor-luz-vercel-six.vercel.app/?id=${dev.deviceId}`;
 
-            // Enviar alerta a todos los invitados/familiares autorizados y registrar sus message_ids individuales
-            const guests = dev.guestChatIds || [];
-            for (const gId of guests) {
-                if (gId && gId !== devChatId) {
-                    const gRes = await sendTelegramMessage(gId, alertMsg, [
-                        [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${dev.deviceId}` }]
-                    ]);
-                    if (gRes?.messageId) {
-                        dev.lastAlertMessages[gId] = gRes.messageId;
+                console.log(`[ALERTA CORTE] Enviando notificación de ida de luz a chatId ${devChatId} para ${dev.deviceId}`);
+                const sendRes = await sendTelegramMessage(devChatId, alertMsg);
+                msgId = sendRes?.messageId || null;
+                dev.lastAlertMessageId = msgId;
+                if (msgId) dev.lastAlertMessages[devChatId] = msgId;
+
+                // Enviar alerta a todos los invitados/familiares autorizados y registrar sus message_ids individuales
+                const guests = dev.guestChatIds || [];
+                for (const gId of guests) {
+                    if (gId && gId !== devChatId) {
+                        const gRes = await sendTelegramMessage(gId, alertMsg, [
+                            [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${dev.deviceId}` }]
+                        ]);
+                        if (gRes?.messageId) {
+                            dev.lastAlertMessages[gId] = gRes.messageId;
+                        }
                     }
                 }
             }
