@@ -115,6 +115,7 @@ async function reverseGeocode(lat, lon) {
             const feat = pData.features && pData.features[0];
             if (feat && feat.properties) {
                 const p = feat.properties;
+                const poi = (p.type === 'house' && p.name && p.name !== p.street) ? p.name : '';
                 const road = p.street || (p.type === 'street' ? p.name : '');
                 const sector = p.locality || p.district || '';
                 let city = p.city || '';
@@ -122,7 +123,13 @@ async function reverseGeocode(lat, lon) {
                     city = 'Maracay';
                 }
                 const state = (p.state || '').replace(/^Estado\s+/i, '');
-                const parts = [road, sector, city, state].filter(Boolean);
+
+                let sectorStr = sector;
+                if (sector && !sector.toLowerCase().startsWith('urb') && !sector.toLowerCase().startsWith('sector') && !sector.toLowerCase().startsWith('barrio')) {
+                    sectorStr = `sector ${sector}`;
+                }
+
+                const parts = [poi, road, sectorStr, city, state].filter(Boolean);
                 const addr = [...new Set(parts)].join(', ');
                 if (addr && addr.length > 5) return addr;
             }
@@ -909,8 +916,10 @@ async function handleTelegramWebhook(request, env) {
                     `🏠 <b>Monitor:</b> <b>${devName}</b> (<code>${locDevId}</code>)\n` +
                     `📌 <b>Coordenadas:</b> <code>${lat.toFixed(5)}, ${lon.toFixed(5)}</code>\n` +
                     `🗺️ <b>Dirección aproximada:</b>\n<i>${address}</i>\n\n` +
-                    `🔒 <b>Ubicación protegida:</b> Ha quedado bloqueada permanentemente para evitar cambios accidentales si sales de casa (por ejemplo, si estás en la playa o de viaje). Solo el administrador puede desbloquearla si te mudas.`,
+                    `🔒 <b>Ubicación protegida:</b> Ha quedado bloqueada permanentemente para evitar cambios accidentales si sales de casa (por ejemplo, si estás en la playa o de viaje).\n\n` +
+                    `💡 <i>¿Deseas agregar el nombre exacto de tu edificio, quinta o punto de referencia? Pulsa el botón de abajo:</i>`,
                     [
+                        [{ text: "✏️ Personalizar Dirección (Edificio/Casa)", callback_data: `/direccion_${locDevId}` }],
                         [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${locDevId}` }],
                         [{ text: "🏠 Mis Monitores", callback_data: "/casas" }]
                     ]
