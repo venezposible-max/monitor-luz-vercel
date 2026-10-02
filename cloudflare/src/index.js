@@ -750,7 +750,9 @@ async function handleTelegramWebhook(request, env) {
         if (chatId === '330749449') {
             const allAdminDevs = await getAllDevicesOptimized(env.DB);
             for (const d of allAdminDevs) {
-                deviceMap[d.deviceId.toUpperCase()] = d;
+                if (!deviceMap[d.deviceId.toUpperCase()]) {
+                    deviceMap[d.deviceId.toUpperCase()] = d;
+                }
             }
         }
 
@@ -1304,8 +1306,25 @@ async function handleTelegramWebhook(request, env) {
             }
 
         } else if (text.startsWith('/historial_')) {
-            const devId = text.replace('/historial_', '').toUpperCase().trim();
-            const dev = getDevice(devId);
+            const devId = text.replace('/historial_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
+            if (dev && (!dev.history || dev.history.length === 0)) {
+                const historyRows = await env.DB.prepare(
+                    "SELECT * FROM history WHERE device_id = ? ORDER BY start_time DESC LIMIT 15"
+                ).bind(dev.deviceId || devId).all();
+                dev.history = (historyRows.results || []).map(h => ({
+                    id: h.id,
+                    start: h.start_time,
+                    end: h.end_time,
+                    startTimeStr: h.start_time_str,
+                    endTimeStr: h.end_time_str,
+                    startDateStr: h.start_date_str,
+                    endDateStr: h.end_date_str,
+                    durationStr: h.duration_str,
+                    durationMs: h.duration_ms,
+                    type: h.event_type
+                }));
+            }
             await sendTelegramMessage(chatId,
                 dev ? buildHistoryMsg(dev, chatId) : `⚠️ No encontré el dispositivo <code>${devId}</code>.`,
                 [[{ text: '📊 Estado en Vivo', callback_data: `/estado_${devId}` }],
@@ -1325,15 +1344,50 @@ async function handleTelegramWebhook(request, env) {
                     })
                 );
             } else {
-                await sendTelegramMessage(chatId, buildHistoryMsg(myDevs[0], chatId), [
-                    [{ text: '📊 Estado en Vivo', callback_data: `/estado_${myDevs[0].deviceId}` }],
+                const d = myDevs[0];
+                if (d && (!d.history || d.history.length === 0)) {
+                    const historyRows = await env.DB.prepare(
+                        "SELECT * FROM history WHERE device_id = ? ORDER BY start_time DESC LIMIT 15"
+                    ).bind(d.deviceId).all();
+                    d.history = (historyRows.results || []).map(h => ({
+                        id: h.id,
+                        start: h.start_time,
+                        end: h.end_time,
+                        startTimeStr: h.start_time_str,
+                        endTimeStr: h.end_time_str,
+                        startDateStr: h.start_date_str,
+                        endDateStr: h.end_date_str,
+                        durationStr: h.duration_str,
+                        durationMs: h.duration_ms,
+                        type: h.event_type
+                    }));
+                }
+                await sendTelegramMessage(chatId, buildHistoryMsg(d, chatId), [
+                    [{ text: '📊 Estado en Vivo', callback_data: `/estado_${d.deviceId}` }],
                     [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
                 ]);
             }
 
         } else if (text.startsWith('/reporte_')) {
-            const devId = text.replace('/reporte_', '').toUpperCase().trim();
-            const dev = getDevice(devId);
+            const devId = text.replace('/reporte_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
+            if (dev && (!dev.history || dev.history.length === 0)) {
+                const historyRows = await env.DB.prepare(
+                    "SELECT * FROM history WHERE device_id = ? ORDER BY start_time DESC LIMIT 30"
+                ).bind(dev.deviceId || devId).all();
+                dev.history = (historyRows.results || []).map(h => ({
+                    id: h.id,
+                    start: h.start_time,
+                    end: h.end_time,
+                    startTimeStr: h.start_time_str,
+                    endTimeStr: h.end_time_str,
+                    startDateStr: h.start_date_str,
+                    endDateStr: h.end_date_str,
+                    durationStr: h.duration_str,
+                    durationMs: h.duration_ms,
+                    type: h.event_type
+                }));
+            }
             await sendTelegramMessage(chatId,
                 dev ? (buildWeeklyReport(dev, chatId) || '⚠️ Sin datos suficientes.') : `⚠️ No encontré el dispositivo <code>${devId}</code>.`,
                 [[{ text: '📊 Estado en Vivo', callback_data: `/estado_${devId}` }],
