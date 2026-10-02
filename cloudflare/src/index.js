@@ -103,6 +103,33 @@ async function sendTelegramRemoveKeyboard(chatId, text, inlineButtons = []) {
 }
 
 async function reverseGeocode(lat, lon) {
+    // 1. Motor Primario: Photon (Komoot) - Alta precisión en avenidas, urbanizaciones y sectores residenciales
+    try {
+        const pUrl = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}`;
+        const pRes = await fetch(pUrl, {
+            headers: { 'User-Agent': 'PowerWatch-Monitor/1.0 (contact@powerwatch.ve)' },
+            signal: AbortSignal.timeout(3500)
+        });
+        if (pRes.ok) {
+            const pData = await pRes.json();
+            const feat = pData.features && pData.features[0];
+            if (feat && feat.properties) {
+                const p = feat.properties;
+                const road = p.street || (p.type === 'street' ? p.name : '');
+                const sector = p.locality || p.district || '';
+                let city = p.city || '';
+                if (city.toLowerCase().startsWith('parroquia') && sector) {
+                    city = 'Maracay';
+                }
+                const state = (p.state || '').replace(/^Estado\s+/i, '');
+                const parts = [road, sector, city, state].filter(Boolean);
+                const addr = [...new Set(parts)].join(', ');
+                if (addr && addr.length > 5) return addr;
+            }
+        }
+    } catch (e) {}
+
+    // 2. Motor Secundario: Nominatim OpenStreetMap
     try {
         const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`;
         const res = await fetch(url, {
@@ -110,7 +137,7 @@ async function reverseGeocode(lat, lon) {
                 'User-Agent': 'PowerWatch-Monitor/1.0 (contact@powerwatch.ve)',
                 'Accept-Language': 'es'
             },
-            signal: AbortSignal.timeout(4000)
+            signal: AbortSignal.timeout(3500)
         });
         if (res.ok) {
             const data = await res.json();
@@ -125,6 +152,7 @@ async function reverseGeocode(lat, lon) {
             return cleanAddress || data.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         }
     } catch (e) {}
+
     return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 }
 
@@ -818,6 +846,30 @@ async function handleTelegramWebhook(request, env) {
             return new Response('OK', { status: 200 });
         }
 
+        // 3b. PENDIENTE: EDITAR DIRECCIÓN ESCRITA
+        if (pending && pending.action === 'SET_ADDRESS' && cleanText.length > 0 && !cleanText.startsWith('/')) {
+            const addrDevId = pending.devId;
+            await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
+
+            const existingDev = getDevice(addrDevId) || await getDeviceFast(env.DB, addrDevId);
+            if (!checkIsOwner(existingDev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede editar la dirección.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            const newAddress = cleanText.trim();
+            await env.DB.prepare("UPDATE devices SET address = ?, updated_at = ? WHERE device_id = ?").bind(newAddress, Date.now(), addrDevId).run();
+
+            await sendTelegramMessage(chatId,
+                `✅ <b>¡Dirección actualizada con éxito!</b>\n\n📍 <b>Monitor:</b> <b>${existingDev?.alias || addrDevId}</b>\n🗺️ <b>Nueva Dirección:</b>\n<i>${newAddress}</i>`,
+                [
+                    [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${addrDevId}` }],
+                    [{ text: "🏠 Mis Monitores", callback_data: "/casas" }]
+                ]
+            );
+            return new Response('OK', { status: 200 });
+        }
+
         // 4. PENDIENTE: FIJAR UBICACIÓN GPS
         if (pending && pending.action === 'SET_LOCATION') {
             if (update.message && update.message.location) {
@@ -1054,13 +1106,37 @@ async function handleTelegramWebhook(request, env) {
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                 [{ text: '📜 Ver Historial', callback_data: `/historial_${devId}` }]
             ];
-            if (isOwn && !dev?.locationLocked) {
-                statusBtns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: `/ubicar_${devId}` }]);
+            if (isOwn) {
+                if (!dev?.locationLocked) {
+                    statusBtns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: `/ubicar_${devId}` }]);
+                }
+                statusBtns.push([{ text: '✏️ Editar Dirección Escrita', callback_data: `/direccion_${devId}` }]);
             }
             if (chatId === '330749449' && dev?.locationLocked) {
                 statusBtns.push([{ text: '🔓 Desbloquear Ubicación (Admin)', callback_data: `/desbloquear_ubicar_${devId}` }]);
             }
             await sendTelegramMessage(chatId, buildStatusMsg(dev, devId, chatId), statusBtns);
+
+        } else if (text.startsWith('/direccion_')) {
+            const devId = text.replace('/direccion_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede modificar la dirección de este monitor.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            const state = { action: 'SET_ADDRESS', devId: devId };
+            await env.DB.prepare("INSERT OR REPLACE INTO pending_states (chat_id, state_json, updated_at) VALUES (?, ?, ?)").bind(chatId, JSON.stringify(state), Date.now()).run();
+
+            await sendTelegramMessage(chatId,
+                `✏️ <b>Modificar Dirección de Monitor</b>\n\n` +
+                `🏠 <b>Monitor:</b> <b>${dev?.alias || devId}</b> (<code>${devId}</code>)\n` +
+                `🗺️ <b>Dirección actual:</b>\n<i>${dev?.address || 'Sin dirección registrada'}</i>\n\n` +
+                `👉 Por favor, escribe la dirección exacta o punto de referencia que deseas que aparezca (ej: <i>Urb. Andrés Bello, Av. Las Delicias, Maracay</i>):`,
+                [[{ text: '❌ Cancelar', callback_data: `/estado_${devId}` }]]
+            );
+            return new Response('OK', { status: 200 });
 
         } else if (text.startsWith('/desbloquear_ubicar_')) {
             if (chatId !== '330749449') {
@@ -1435,6 +1511,7 @@ async function handleTelegramWebhook(request, env) {
                         reportMsg += `   • 🔓 <b>Desbloquear GPS:</b> /desbloquear_ubicar_${d.deviceId.replace(/-/g, '_')}\n`;
                     }
                 }
+                reportMsg += `   • ✏️ <b>Editar Dirección:</b> /direccion_${d.deviceId.replace(/-/g, '_')}\n`;
                 reportMsg += `   • Red: ${ispInfo} | IP: <code>${d.ip || '0.0.0.0'}</code>\n`;
                 reportMsg += `   • 🚨 <b>Reset de Fábrica:</b> /reset_${d.deviceId.replace(/-/g, '_')}\n`;
                 reportMsg += `   • Tiempo con luz: ${uptimeStr}\n`;
