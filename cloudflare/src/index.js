@@ -1389,10 +1389,8 @@ async function handlePing(request, env) {
 
     const boardUptimeMs = parseInt(body.uptimeMs || 0, 10);
     const chatId = (body.chatId || body.telegramChatId || '').toString().trim();
-    const offlinePings = parseInt(body.offlinePings || body.missedPings || 0, 10);
-    const incomingAlias = (body.alias || body.name || '').toString().trim();
-
     const now = Date.now();
+    const clientIp = getClientIp(request);
     const existing = await getDeviceFast(env.DB, deviceId);
 
     const shouldReset = existing ? existing.resetRequested : false;
@@ -1509,7 +1507,6 @@ async function handlePing(request, env) {
     }
 
     // Geolocalización y detección anti-datacenter
-    const clientIp = getClientIp(request);
     const geo = await resolveGeo(request, clientIp, existing, deviceId);
     const city = geo.city;
     const region = geo.region;
