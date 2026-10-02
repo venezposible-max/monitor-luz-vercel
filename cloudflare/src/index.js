@@ -1063,7 +1063,7 @@ async function handleTelegramWebhook(request, env) {
                 await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Administrador puede desbloquear la ubicación.`);
                 return new Response('OK', { status: 200 });
             }
-            const devId = text.replace('/desbloquear_ubicar_', '').toUpperCase().trim();
+            const devId = text.replace('/desbloquear_ubicar_', '').toUpperCase().replace(/_/g, '-').trim();
             const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
             if (!dev) {
                 await sendTelegramMessage(chatId, `⚠️ Dispositivo no encontrado: <code>${devId}</code>`);
@@ -1428,7 +1428,7 @@ async function handleTelegramWebhook(request, env) {
                 if (d.address) {
                     reportMsg += `   • GPS: ${d.address} ${d.locationLocked ? '🔒' : '🔓'}\n`;
                     if (d.locationLocked) {
-                        reportMsg += `   • 🔓 <b>Desbloquear GPS:</b> /desbloquear_ubicar_${d.deviceId}\n`;
+                        reportMsg += `   • 🔓 <b>Desbloquear GPS:</b> /desbloquear_ubicar_${d.deviceId.replace(/-/g, '_')}\n`;
                     }
                 }
                 reportMsg += `   • Red: ${ispInfo} | IP: <code>${d.ip || '0.0.0.0'}</code>\n`;
