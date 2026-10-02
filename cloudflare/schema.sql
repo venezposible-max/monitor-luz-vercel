@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS kv_config (
 
 -- Índices para optimizar consultas de telemetría y consultas por usuario
 CREATE INDEX IF NOT EXISTS idx_devices_chat_id ON devices(chat_id);
+CREATE INDEX IF NOT EXISTS idx_devices_blackout ON devices(blackout_notified, last_seen);
 CREATE INDEX IF NOT EXISTS idx_guests_device_id ON guests(device_id);
 CREATE INDEX IF NOT EXISTS idx_guests_chat_id ON guests(guest_chat_id);
 CREATE INDEX IF NOT EXISTS idx_history_device_id ON history(device_id);
+CREATE INDEX IF NOT EXISTS idx_history_device_start ON history(device_id, start_time DESC);
 CREATE INDEX IF NOT EXISTS idx_history_start ON history(start_time DESC);

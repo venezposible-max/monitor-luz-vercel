@@ -54,6 +54,76 @@ async function deleteTelegramMessage(chatId, messageId) {
     } catch (e) {}
 }
 
+async function sendTelegramReplyKeyboard(chatId, text, keyboard) {
+    if (!chatId) return { success: false, messageId: null };
+    try {
+        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: String(chatId).trim(),
+                text: text,
+                parse_mode: 'HTML',
+                reply_markup: {
+                    keyboard: keyboard,
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            })
+        });
+        const data = await res.json();
+        return { success: data.ok, messageId: data.result?.message_id || null };
+    } catch (e) {
+        return { success: false, messageId: null };
+    }
+}
+
+async function sendTelegramRemoveKeyboard(chatId, text, inlineButtons = []) {
+    if (!chatId) return { success: false, messageId: null };
+    try {
+        const bodyObj = {
+            chat_id: String(chatId).trim(),
+            text: text,
+            parse_mode: 'HTML',
+            reply_markup: { remove_keyboard: true }
+        };
+        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyObj)
+        });
+        if (inlineButtons && inlineButtons.length > 0) {
+            await sendTelegramMessage(chatId, "👇 Opciones disponibles:", inlineButtons);
+        }
+        const data = await res.json();
+        return { success: data.ok, messageId: data.result?.message_id || null };
+    } catch (e) {
+        return { success: false, messageId: null };
+    }
+}
+
+async function reverseGeocode(lat, lon) {
+    try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+        const res = await fetch(url, {
+            headers: { 'User-Agent': 'PowerWatch-Monitor/1.0 (contact@powerwatch.ve)' },
+            signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const a = data.address || {};
+            const street = a.road || a.pedestrian || a.suburb || a.neighbourhood || '';
+            const sector = a.neighbourhood || a.suburb || a.city_district || '';
+            const city = a.city || a.town || a.village || a.county || '';
+            const state = a.state || '';
+            const parts = [street, sector, city, state].filter(Boolean);
+            const cleanAddress = [...new Set(parts)].join(', ');
+            return cleanAddress || data.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        }
+    } catch (e) {}
+    return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
 // --- HELPERS FECHA Y HORA (Venezuela America/Caracas) ---
 
 function formatVETime(timestamp) {
@@ -249,6 +319,10 @@ async function getDeviceFull(db, deviceId) {
         city: dev.city || '',
         region: dev.region || '',
         isp: dev.isp || '',
+        latitude: dev.latitude || null,
+        longitude: dev.longitude || null,
+        address: dev.address || '',
+        locationLocked: Boolean(dev.location_locked),
         unlinked: Boolean(dev.unlinked),
         resetRequested: Boolean(dev.reset_requested),
         updatedAt: dev.updated_at || 0,
@@ -282,6 +356,10 @@ async function getDeviceFast(db, deviceId) {
         city: dev.city || '',
         region: dev.region || '',
         isp: dev.isp || '',
+        latitude: dev.latitude || null,
+        longitude: dev.longitude || null,
+        address: dev.address || '',
+        locationLocked: Boolean(dev.location_locked),
         unlinked: Boolean(dev.unlinked),
         resetRequested: Boolean(dev.reset_requested),
         updatedAt: dev.updated_at || 0
@@ -349,6 +427,10 @@ async function getDevicesForUser(db, chatId) {
             city: dev.city || '',
             region: dev.region || '',
             isp: dev.isp || '',
+            latitude: dev.latitude || null,
+            longitude: dev.longitude || null,
+            address: dev.address || '',
+            locationLocked: Boolean(dev.location_locked),
             unlinked: Boolean(dev.unlinked),
             resetRequested: Boolean(dev.reset_requested),
             updatedAt: dev.updated_at || 0,
@@ -392,6 +474,10 @@ async function getAllDevicesOptimized(db) {
         city: dev.city || '',
         region: dev.region || '',
         isp: dev.isp || '',
+        latitude: dev.latitude || null,
+        longitude: dev.longitude || null,
+        address: dev.address || '',
+        locationLocked: Boolean(dev.location_locked),
         unlinked: Boolean(dev.unlinked),
         resetRequested: Boolean(dev.reset_requested),
         updatedAt: dev.updated_at || 0,
@@ -450,9 +536,12 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const devRegion = (known && known.region) ? known.region : dev.region;
     const devIsp = (known && known.isp) ? known.isp : ((dev.isp && !isDatacenter('', dev.isp)) ? dev.isp : '');
 
-    const geoInfo = (devCity && devIsp) ? 
+    let geoInfo = (devCity && devIsp) ? 
         `🏢 <b>Ciudad:</b> ${devCity}, ${devRegion || ''}\n` +
         `🌐 <b>Red:</b> ${devIsp}\n` : '';
+    if (dev.address) {
+        geoInfo += `📍 <b>Ubicación:</b> ${dev.address}\n`;
+    }
 
     let effectiveOnlineSince = dev.onlineSince || lastSeen;
     if (dev.history && dev.history.length > 0) {
@@ -725,6 +814,46 @@ async function handleTelegramWebhook(request, env) {
             return new Response('OK', { status: 200 });
         }
 
+        // 4. PENDIENTE: FIJAR UBICACIÓN GPS
+        if (pending && pending.action === 'SET_LOCATION') {
+            if (update.message && update.message.location) {
+                const locDevId = pending.devId;
+                await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
+                const existingDev = getDevice(locDevId);
+                if (!checkIsOwner(existingDev, chatId, true)) {
+                    await sendTelegramRemoveKeyboard(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede fijar la ubicación.`);
+                    return new Response('OK', { status: 200 });
+                }
+
+                const lat = update.message.location.latitude;
+                const lon = update.message.location.longitude;
+                const address = await reverseGeocode(lat, lon);
+
+                await env.DB.prepare("UPDATE devices SET latitude = ?, longitude = ?, address = ?, location_locked = 1, updated_at = ? WHERE device_id = ?")
+                    .bind(lat, lon, address, Date.now(), locDevId).run();
+
+                const devName = existingDev?.alias || locDevId;
+                await sendTelegramRemoveKeyboard(chatId,
+                    `📍 <b>¡Ubicación fijada con éxito!</b>\n\n` +
+                    `🏠 <b>Monitor:</b> <b>${devName}</b> (<code>${locDevId}</code>)\n` +
+                    `📌 <b>Coordenadas:</b> <code>${lat.toFixed(5)}, ${lon.toFixed(5)}</code>\n` +
+                    `🗺️ <b>Dirección aproximada:</b>\n<i>${address}</i>\n\n` +
+                    `🔒 <b>Ubicación protegida:</b> Ha quedado bloqueada permanentemente para evitar cambios accidentales si sales de casa (por ejemplo, si estás en la playa o de viaje). Solo el administrador puede desbloquearla si te mudas.`,
+                    [
+                        [{ text: "📊 Ver Estado en Vivo", callback_data: `/estado_${locDevId}` }],
+                        [{ text: "🏠 Mis Monitores", callback_data: "/casas" }]
+                    ]
+                );
+                return new Response('OK', { status: 200 });
+            } else if (cleanText.toLowerCase().includes('cancelar') || cleanText.toLowerCase().includes('omitir')) {
+                await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
+                await sendTelegramRemoveKeyboard(chatId, `❌ <b>Operación cancelada.</b> No se modificó la ubicación.`, [
+                    [{ text: "🏠 Mis Monitores", callback_data: "/casas" }]
+                ]);
+                return new Response('OK', { status: 200 });
+            }
+        }
+
         // --- COMANDOS Y MENÚS TELEGRAM ---
 
         if (text.startsWith('/skip_guest_name_')) {
@@ -915,10 +1044,128 @@ async function handleTelegramWebhook(request, env) {
 
         } else if (text.startsWith('/estado_')) {
             const devId = text.replace('/estado_', '').toUpperCase().trim();
-            await sendTelegramMessage(chatId, buildStatusMsg(getDevice(devId), devId, chatId), [
+            const dev = getDevice(devId);
+            const isOwn = checkIsOwner(dev, chatId, true);
+            const statusBtns = [
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                 [{ text: '📜 Ver Historial', callback_data: `/historial_${devId}` }]
-            ]);
+            ];
+            if (isOwn && !dev?.locationLocked) {
+                statusBtns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: `/ubicar_${devId}` }]);
+            }
+            if (chatId === '330749449' && dev?.locationLocked) {
+                statusBtns.push([{ text: '🔓 Desbloquear Ubicación (Admin)', callback_data: `/desbloquear_ubicar_${devId}` }]);
+            }
+            await sendTelegramMessage(chatId, buildStatusMsg(dev, devId, chatId), statusBtns);
+
+        } else if (text.startsWith('/desbloquear_ubicar_')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Administrador puede desbloquear la ubicación.`);
+                return new Response('OK', { status: 200 });
+            }
+            const devId = text.replace('/desbloquear_ubicar_', '').toUpperCase().trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
+            if (!dev) {
+                await sendTelegramMessage(chatId, `⚠️ Dispositivo no encontrado: <code>${devId}</code>`);
+                return new Response('OK', { status: 200 });
+            }
+            await env.DB.prepare("UPDATE devices SET location_locked = 0, updated_at = ? WHERE device_id = ?").bind(Date.now(), devId).run();
+            await sendTelegramMessage(chatId,
+                `🔓 <b>Ubicación desbloqueada con éxito</b> para el monitor <b>${dev.alias || devId}</b> (<code>${devId}</code>).\n\nEl usuario ahora puede volver a usar el botón 📍 Fijar Ubicación GPS para re-calibrar su posición si se mudó.`,
+                [
+                    [{ text: '📍 Fijar Ubicación Ahora', callback_data: `/ubicar_${devId}` }],
+                    [{ text: '👑 Panel de Administración', callback_data: '/admin' }]
+                ]
+            );
+            return new Response('OK', { status: 200 });
+
+        } else if (text.startsWith('/ubicar_')) {
+            const devId = text.replace('/ubicar_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede calibrar la ubicación de este monitor.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            if (dev?.locationLocked) {
+                const adminUnlockBtn = (chatId === '330749449') ? [[{ text: '🔓 Desbloquear (Admin)', callback_data: `/desbloquear_ubicar_${devId}` }]] : [];
+                await sendTelegramMessage(chatId,
+                    `🔒 <b>Ubicación ya fijada y protegida</b>\n\n` +
+                    `📍 <b>Monitor:</b> <b>${dev.alias || devId}</b> (<code>${devId}</code>)\n` +
+                    `🗺️ <b>Dirección actual:</b>\n<i>${dev.address || `${dev.latitude}, ${dev.longitude}`}</i>\n\n` +
+                    `Por seguridad, esta función quedó bloqueada permanentemente para evitar que se desconfigure si te conectas fuera de tu casa (playa, viajes o trabajo).\n\n` +
+                    `<i>Si te mudaste de casa o necesitas re-calibrar, pide al administrador que desbloquee tu monitor.</i>`,
+                    [
+                        ...adminUnlockBtn,
+                        [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                    ]
+                );
+                return new Response('OK', { status: 200 });
+            }
+
+            const state = { action: 'SET_LOCATION', devId: devId };
+            await env.DB.prepare("INSERT OR REPLACE INTO pending_states (chat_id, state_json, updated_at) VALUES (?, ?, ?)").bind(chatId, JSON.stringify(state), Date.now()).run();
+
+            await sendTelegramReplyKeyboard(chatId,
+                `📍 <b>FIJAR UBICACIÓN EXACTA DE TU CASA</b>\n\n` +
+                `🏠 <b>Monitor:</b> <b>${dev?.alias || devId}</b> (<code>${devId}</code>)\n\n` +
+                `⚠️ <b>IMPORTANTE:</b>\n` +
+                `1. Realiza este paso <b>estando físicamente en tu casa</b> (conectado al WiFi de tu casa o con el GPS encendido en tu móvil).\n` +
+                `2. Una vez guardada, la ubicación <b>quedará bloqueada automáticamente</b> para que nunca se altere cuando salgas de casa.\n\n` +
+                `👇 Presiona el botón verde de abajo para enviar tu ubicación actual:`,
+                [
+                    [{ text: "📍 Enviar Mi Ubicación Actual", request_location: true }],
+                    [{ text: "❌ Cancelar" }]
+                ]
+            );
+            return new Response('OK', { status: 200 });
+
+        } else if (text.includes('/ubicar') || text.includes('ubicar') || text.includes('localizacion') || text.includes('ubicacion')) {
+            const myDevs = devs.filter(d => checkIsOwner(d, chatId, true));
+            if (myDevs.length === 0) {
+                await sendTelegramMessage(chatId, `⚠️ No tienes monitores vinculados como propietario en tu Chat ID (<code>${chatId}</code>).`, []);
+            } else if (myDevs.length === 1) {
+                const d = myDevs[0];
+                if (d.locationLocked) {
+                    const adminUnlockBtn = (chatId === '330749449') ? [[{ text: '🔓 Desbloquear (Admin)', callback_data: `/desbloquear_ubicar_${d.deviceId}` }]] : [];
+                    await sendTelegramMessage(chatId,
+                        `🔒 <b>Ubicación ya fijada y protegida</b>\n\n` +
+                        `📍 <b>Monitor:</b> <b>${d.alias || d.deviceId}</b>\n` +
+                        `🗺️ <b>Dirección actual:</b>\n<i>${d.address || `${d.latitude}, ${d.longitude}`}</i>\n\n` +
+                        `Por seguridad, esta opción se deshabilitó tras fijarla una vez para proteger tu sistema contra ubicaciones erróneas cuando salgas de casa.`,
+                        [
+                            ...adminUnlockBtn,
+                            [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
+                        ]
+                    );
+                } else {
+                    const state = { action: 'SET_LOCATION', devId: d.deviceId };
+                    await env.DB.prepare("INSERT OR REPLACE INTO pending_states (chat_id, state_json, updated_at) VALUES (?, ?, ?)").bind(chatId, JSON.stringify(state), Date.now()).run();
+                    await sendTelegramReplyKeyboard(chatId,
+                        `📍 <b>FIJAR UBICACIÓN EXACTA DE TU CASA</b>\n\n` +
+                        `🏠 <b>Monitor:</b> <b>${d.alias || d.deviceId}</b> (<code>${d.deviceId}</code>)\n\n` +
+                        `⚠️ <b>IMPORTANTE:</b>\n` +
+                        `1. Realiza este paso <b>estando físicamente en tu casa</b> (conectado al WiFi de tu casa o con el GPS encendido en tu móvil).\n` +
+                        `2. Una vez guardada, la ubicación <b>quedará bloqueada automáticamente</b> para que nunca se altere cuando viajes o estés fuera de casa.\n\n` +
+                        `👇 Presiona el botón verde de abajo para enviar tu ubicación actual:`,
+                        [
+                            [{ text: "📍 Enviar Mi Ubicación Actual", request_location: true }],
+                            [{ text: "❌ Cancelar" }]
+                        ]
+                    );
+                }
+            } else {
+                let txt = `📍 <b>FIJAR UBICACIÓN DE TU CASA</b>\n\n¿A cuál de tus monitores deseas fijarle la ubicación GPS?\n\n`;
+                const btns = [];
+                myDevs.forEach(d => {
+                    const lockStatus = d.locationLocked ? '🔒 [Fijada]' : '📍 [Pendiente]';
+                    txt += `• <b>${d.alias || d.deviceId}</b> ${lockStatus}\n`;
+                    btns.push([{ text: `📍 Calibrar ${d.alias || d.deviceId} ${lockStatus}`, callback_data: `/ubicar_${d.deviceId}` }]);
+                });
+                btns.push([{ text: '🔙 Volver a Mis Monitores', callback_data: '/casas' }]);
+                await sendTelegramMessage(chatId, txt, btns);
+            }
 
         } else if (text.includes('/estado') || text.includes('estado')) {
             const now = Date.now();
@@ -959,6 +1206,7 @@ async function handleTelegramWebhook(request, env) {
                 });
                 btns.push([{ text: '✏️ Cambiar Nombre', callback_data: '/renombrar' }]);
                 btns.push([{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }]);
+                btns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: '/ubicar' }]);
                 if (chatId === '330749449') {
                     btns.push([{ text: '👑 Panel de Administración', callback_data: '/admin' }]);
                 }
@@ -1177,6 +1425,12 @@ async function handleTelegramWebhook(request, env) {
                 reportMsg += `${idx + 1}. ${statusIcon} <b>${aliasName}</b> (<code>${d.deviceId}</code>)\n`;
                 reportMsg += `   • Estado: <b>${statusText}</b> (hace ${elapsedStr})\n`;
                 if (cityInfo) reportMsg += `   • Ubicación: ${cityInfo}\n`;
+                if (d.address) {
+                    reportMsg += `   • GPS: ${d.address} ${d.locationLocked ? '🔒' : '🔓'}\n`;
+                    if (d.locationLocked) {
+                        reportMsg += `   • 🔓 <b>Desbloquear GPS:</b> /desbloquear_ubicar_${d.deviceId}\n`;
+                    }
+                }
                 reportMsg += `   • Red: ${ispInfo} | IP: <code>${d.ip || '0.0.0.0'}</code>\n`;
                 reportMsg += `   • 🚨 <b>Reset de Fábrica:</b> /reset_${d.deviceId.replace(/-/g, '_')}\n`;
                 reportMsg += `   • Tiempo con luz: ${uptimeStr}\n`;
