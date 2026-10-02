@@ -531,6 +531,9 @@ function checkIsOwner(dev, chatId, strict = false) {
     if (reqId === '3307499449') reqId = '330749449';
     if (devOwnerId === '3307499449') devOwnerId = '330749449';
 
+    // El Super Administrador tiene control y permisos absolutos sobre cualquier monitor
+    if (reqId === '330749449') return true;
+
     const guests = (dev.guestChatIds || []).map(g => {
         let id = String(g).trim();
         return id === '3307499449' ? '330749449' : id;
@@ -741,8 +744,15 @@ async function handleTelegramWebhook(request, env) {
             deviceMap[d.deviceId.toUpperCase()] = d;
         }
 
+        if (chatId === '330749449') {
+            const allAdminDevs = await getAllDevicesOptimized(env.DB);
+            for (const d of allAdminDevs) {
+                deviceMap[d.deviceId.toUpperCase()] = d;
+            }
+        }
+
         const getDevice = (id) => {
-            const norm = String(id || '').toUpperCase().trim();
+            const norm = String(id || '').toUpperCase().replace(/_/g, '-').trim();
             return deviceMap[norm] || null;
         };
         const getMyDevs = () => myDevs;
@@ -1082,11 +1092,11 @@ async function handleTelegramWebhook(request, env) {
             );
 
         } else if (text.startsWith('/pedirnombre_')) {
-            const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
-            const dev = getDevice(devId);
+            const devId = text.replace('/pedirnombre_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
 
             if (!checkIsOwner(dev, chatId, true)) {
-                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede renombrar este monitor.`, []);
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede renombrar este monitor.`, []);
                 return new Response('OK', { status: 200 });
             }
 
@@ -1094,13 +1104,13 @@ async function handleTelegramWebhook(request, env) {
             await env.DB.prepare("INSERT OR REPLACE INTO pending_states (chat_id, state_json, updated_at) VALUES (?, ?, ?)").bind(chatId, JSON.stringify(state), Date.now()).run();
 
             await sendTelegramMessage(chatId,
-                `✏️ <b>Renombrando:</b> <code>${dev.alias || devId}</code> (<code>${devId}</code>)\n\n👉 Escribe el nuevo nombre (ej: <i>Casa Maracay</i>):`,
-                [[{ text: '❌ Cancelar', callback_data: '/casas' }]]
+                `✏️ <b>Renombrando:</b> <code>${dev?.alias || devId}</code> (<code>${devId}</code>)\n\n👉 Escribe el nuevo nombre (ej: <i>Casa Maracay</i>):`,
+                [[{ text: '❌ Cancelar', callback_data: (chatId === '330749449' ? '/admin' : '/casas') }]]
             );
 
         } else if (text.startsWith('/estado_')) {
-            const devId = text.replace('/estado_', '').toUpperCase().trim();
-            const dev = getDevice(devId);
+            const devId = text.replace('/estado_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
             const isOwn = checkIsOwner(dev, chatId, true);
             const statusBtns = [
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
@@ -1512,6 +1522,7 @@ async function handleTelegramWebhook(request, env) {
                     }
                 }
                 reportMsg += `   • ✏️ <b>Editar Dirección:</b> /direccion_${d.deviceId.replace(/-/g, '_')}\n`;
+                reportMsg += `   • 🏷️ <b>Cambiar Nombre:</b> /pedirnombre_${d.deviceId.replace(/-/g, '_')}\n`;
                 reportMsg += `   • Red: ${ispInfo} | IP: <code>${d.ip || '0.0.0.0'}</code>\n`;
                 reportMsg += `   • 🚨 <b>Reset de Fábrica:</b> /reset_${d.deviceId.replace(/-/g, '_')}\n`;
                 reportMsg += `   • Tiempo con luz: ${uptimeStr}\n`;
