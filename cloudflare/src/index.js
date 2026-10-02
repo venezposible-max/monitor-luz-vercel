@@ -523,16 +523,13 @@ async function getAllDevicesFull(db) {
     return await getAllDevicesOptimized(db);
 }
 
-// Helper: verificar titular
+// Helper: verificar titular real
 function checkIsOwner(dev, chatId, strict = false) {
     if (!dev) return !strict;
     let reqId = String(chatId || '').trim();
     let devOwnerId = String(dev.chatId || '').trim();
     if (reqId === '3307499449') reqId = '330749449';
     if (devOwnerId === '3307499449') devOwnerId = '330749449';
-
-    // El Super Administrador tiene control y permisos absolutos sobre cualquier monitor
-    if (reqId === '330749449') return true;
 
     const guests = (dev.guestChatIds || []).map(g => {
         let id = String(g).trim();
@@ -543,6 +540,12 @@ function checkIsOwner(dev, chatId, strict = false) {
     if (reqId && devOwnerId && reqId === devOwnerId) return true;
     if (strict) return false;
     return !devOwnerId;
+}
+
+function canAdminDevice(chatId) {
+    let reqId = String(chatId || '').trim();
+    if (reqId === '3307499449') reqId = '330749449';
+    return reqId === '330749449';
 }
 
 function getGuestName(dev, guestChatId) {
@@ -837,9 +840,9 @@ async function handleTelegramWebhook(request, env) {
             const renameDevId = pending.devId;
             await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
 
-            const existingDev = getDevice(renameDevId);
-            if (!checkIsOwner(existingDev, chatId, true)) {
-                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede renombrar este monitor.`, []);
+            const existingDev = getDevice(renameDevId) || await getDeviceFast(env.DB, renameDevId);
+            if (!checkIsOwner(existingDev, chatId, true) && !canAdminDevice(chatId)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede renombrar este monitor.`, []);
                 return new Response('OK', { status: 200 });
             }
 
@@ -862,7 +865,7 @@ async function handleTelegramWebhook(request, env) {
             await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
 
             const existingDev = getDevice(addrDevId) || await getDeviceFast(env.DB, addrDevId);
-            if (!checkIsOwner(existingDev, chatId, true)) {
+            if (!checkIsOwner(existingDev, chatId, true) && !canAdminDevice(chatId)) {
                 await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede editar la dirección.`, []);
                 return new Response('OK', { status: 200 });
             }
@@ -885,9 +888,9 @@ async function handleTelegramWebhook(request, env) {
             if (update.message && update.message.location) {
                 const locDevId = pending.devId;
                 await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
-                const existingDev = getDevice(locDevId);
-                if (!checkIsOwner(existingDev, chatId, true)) {
-                    await sendTelegramRemoveKeyboard(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede fijar la ubicación.`);
+                const existingDev = getDevice(locDevId) || await getDeviceFast(env.DB, locDevId);
+                if (!checkIsOwner(existingDev, chatId, true) && !canAdminDevice(chatId)) {
+                    await sendTelegramRemoveKeyboard(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede fijar la ubicación.`);
                     return new Response('OK', { status: 200 });
                 }
 
@@ -1095,7 +1098,7 @@ async function handleTelegramWebhook(request, env) {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().replace(/_/g, '-').trim();
             const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
 
-            if (!checkIsOwner(dev, chatId, true)) {
+            if (!checkIsOwner(dev, chatId, true) && !canAdminDevice(chatId)) {
                 await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede renombrar este monitor.`, []);
                 return new Response('OK', { status: 200 });
             }
@@ -1116,7 +1119,7 @@ async function handleTelegramWebhook(request, env) {
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                 [{ text: '📜 Ver Historial', callback_data: `/historial_${devId}` }]
             ];
-            if (isOwn) {
+            if (isOwn || canAdminDevice(chatId)) {
                 if (!dev?.locationLocked) {
                     statusBtns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: `/ubicar_${devId}` }]);
                 }
@@ -1131,7 +1134,7 @@ async function handleTelegramWebhook(request, env) {
             const devId = text.replace('/direccion_', '').toUpperCase().replace(/_/g, '-').trim();
             const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
 
-            if (!checkIsOwner(dev, chatId, true)) {
+            if (!checkIsOwner(dev, chatId, true) && !canAdminDevice(chatId)) {
                 await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede modificar la dirección de este monitor.`, []);
                 return new Response('OK', { status: 200 });
             }
@@ -1170,11 +1173,11 @@ async function handleTelegramWebhook(request, env) {
             return new Response('OK', { status: 200 });
 
         } else if (text.startsWith('/ubicar_')) {
-            const devId = text.replace('/ubicar_', '').toUpperCase().trim();
-            const dev = getDevice(devId);
+            const devId = text.replace('/ubicar_', '').toUpperCase().replace(/_/g, '-').trim();
+            const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
 
-            if (!checkIsOwner(dev, chatId, true)) {
-                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) puede calibrar la ubicación de este monitor.`, []);
+            if (!checkIsOwner(dev, chatId, true) && !canAdminDevice(chatId)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) o Administrador puede calibrar la ubicación de este monitor.`, []);
                 return new Response('OK', { status: 200 });
             }
 
