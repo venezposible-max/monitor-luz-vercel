@@ -104,19 +104,23 @@ async function sendTelegramRemoveKeyboard(chatId, text, inlineButtons = []) {
 
 async function reverseGeocode(lat, lon) {
     try {
-        const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`;
         const res = await fetch(url, {
-            headers: { 'User-Agent': 'PowerWatch-Monitor/1.0 (contact@powerwatch.ve)' },
+            headers: { 
+                'User-Agent': 'PowerWatch-Monitor/1.0 (contact@powerwatch.ve)',
+                'Accept-Language': 'es'
+            },
             signal: AbortSignal.timeout(4000)
         });
         if (res.ok) {
             const data = await res.json();
             const a = data.address || {};
-            const street = a.road || a.pedestrian || a.suburb || a.neighbourhood || '';
-            const sector = a.neighbourhood || a.suburb || a.city_district || '';
+            const road = a.road || a.pedestrian || a.street || a.highway || '';
+            const sector = a.quarter || a.neighbourhood || a.suburb || a.residential || a.subdivision || a.city_district || a.hamlet || '';
+            const parroquia = a.municipality || '';
             const city = a.city || a.town || a.village || a.county || '';
-            const state = a.state || '';
-            const parts = [street, sector, city, state].filter(Boolean);
+            const state = (a.state || '').replace(/^Estado\s+/i, '');
+            const parts = [road, sector, parroquia, city, state].filter(Boolean);
             const cleanAddress = [...new Set(parts)].join(', ');
             return cleanAddress || data.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         }
