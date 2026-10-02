@@ -889,8 +889,8 @@ async function handleTelegramWebhook(request, env) {
                 const locDevId = pending.devId;
                 await env.DB.prepare("DELETE FROM pending_states WHERE chat_id = ?").bind(chatId).run();
                 const existingDev = getDevice(locDevId) || await getDeviceFast(env.DB, locDevId);
-                if (!checkIsOwner(existingDev, chatId, true) && !canAdminDevice(chatId)) {
-                    await sendTelegramRemoveKeyboard(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario o Administrador puede fijar la ubicación.`);
+                if (!checkIsOwner(existingDev, chatId, true)) {
+                    await sendTelegramRemoveKeyboard(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) que reside en la vivienda puede fijar la ubicación GPS.`);
                     return new Response('OK', { status: 200 });
                 }
 
@@ -1119,14 +1119,11 @@ async function handleTelegramWebhook(request, env) {
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
                 [{ text: '📜 Ver Historial', callback_data: `/historial_${devId}` }]
             ];
-            if (isOwn || canAdminDevice(chatId)) {
+            if (isOwn) {
                 if (!dev?.locationLocked) {
                     statusBtns.push([{ text: '📍 Fijar Ubicación GPS', callback_data: `/ubicar_${devId}` }]);
                 }
                 statusBtns.push([{ text: '✏️ Editar Dirección Escrita', callback_data: `/direccion_${devId}` }]);
-            }
-            if (chatId === '330749449' && dev?.locationLocked) {
-                statusBtns.push([{ text: '🔓 Desbloquear Ubicación (Admin)', callback_data: `/desbloquear_ubicar_${devId}` }]);
             }
             await sendTelegramMessage(chatId, buildStatusMsg(dev, devId, chatId), statusBtns);
 
@@ -1176,8 +1173,8 @@ async function handleTelegramWebhook(request, env) {
             const devId = text.replace('/ubicar_', '').toUpperCase().replace(/_/g, '-').trim();
             const dev = getDevice(devId) || await getDeviceFast(env.DB, devId);
 
-            if (!checkIsOwner(dev, chatId, true) && !canAdminDevice(chatId)) {
-                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) o Administrador puede calibrar la ubicación de este monitor.`, []);
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario (Titular) que reside en la vivienda puede fijar la ubicación GPS con su móvil.`, []);
                 return new Response('OK', { status: 200 });
             }
 
