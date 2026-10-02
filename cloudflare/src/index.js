@@ -81,6 +81,118 @@ function getWebUrl(devId, chatId = '') {
     return `https://monitor-luz-vercel-six.vercel.app/?id=${devId}${cidParam}`;
 }
 
+// --- HELPERS IP Y GEOLOCALIZACIÓN ---
+
+function isPrivateIp(ip) {
+    if (!ip) return true;
+    const str = String(ip).trim();
+    return str.startsWith('10.') || str.startsWith('192.168.') || 
+           /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(str) || 
+           str === '127.0.0.1' || str === '0.0.0.0' || str === '::1';
+}
+
+function isDatacenter(city, isp) {
+    const c = String(city || '').toLowerCase();
+    const i = String(isp || '').toLowerCase();
+    const datacenterKeywords = [
+        'ashburn', 'seattle', 'amazon', 'vercel', 'cloudflare', 'google', 
+        'microsoft', 'datacenter', 'hosting', 'ovh', 'digitalocean', 
+        'fastly', 'hetzner', 'linode', 'oracle', 'akamai'
+    ];
+    return datacenterKeywords.some(k => c.includes(k) || i.includes(k));
+}
+
+function getClientIp(request) {
+    // 1. Cabeceras de proxy (Vercel pasa la IP real del ESP en x-forwarded-for)
+    const xff = request.headers.get('x-forwarded-for');
+    if (xff) {
+        const parts = xff.split(',').map(p => p.trim());
+        if (parts[0] && !isPrivateIp(parts[0])) return parts[0];
+        for (const p of parts) {
+            if (p && !isPrivateIp(p)) return p;
+        }
+    }
+    const xReal = request.headers.get('x-real-ip') || request.headers.get('x-vercel-forwarded-for');
+    if (xReal && !isPrivateIp(xReal.trim())) {
+        return xReal.trim();
+    }
+    return request.headers.get('cf-connecting-ip') || '0.0.0.0';
+}
+
+const KNOWN_DEVICE_GEO = {
+    'ESP-51A1B1': { city: 'Maracay', region: 'Aragua', sector: 'Las Delicias', isp: 'FIBEX TELECOM' },
+    'ESP-3641CA': { city: 'Maracay', region: 'Aragua', sector: 'El Castaño', isp: 'INTER' },
+    'ESP-D73804': { city: 'Maracay', region: 'Aragua', sector: 'Av. Bermúdez', isp: 'FIBEX TELECOM' },
+    'ESP-7A562F': { city: 'Turmero', region: 'Aragua', sector: 'Turmero', isp: 'NERVICOM' },
+    'ESP-367399': { city: 'Caracas', region: 'Dtto. Capital', sector: 'Caracas', isp: 'INTER' },
+};
+
+async function resolveGeo(request, clientIp, existing, deviceId) {
+    const devId = (deviceId || '').toUpperCase();
+    if (KNOWN_DEVICE_GEO[devId]) {
+        return {
+            city: KNOWN_DEVICE_GEO[devId].city,
+            region: KNOWN_DEVICE_GEO[devId].region,
+            sector: KNOWN_DEVICE_GEO[devId].sector,
+            isp: KNOWN_DEVICE_GEO[devId].isp
+        };
+    }
+
+    // 1. Si el dispositivo ya tiene ubicación venezolana válida (no datacenter), mantenerla siempre
+    const existingValid = existing && existing.city && !isDatacenter(existing.city, existing.isp);
+    if (existingValid) {
+        const isp = request.cf?.asOrganization || existing.isp || '';
+        return {
+            city: existing.city,
+            region: existing.region || '',
+            isp: isp
+        };
+    }
+
+    // 2. Si la petición vino directa a Cloudflare con datos válidos
+    const cfCity = request.cf?.city;
+    const cfRegion = request.cf?.region;
+    const cfIsp = request.cf?.asOrganization;
+    if (cfCity && !isDatacenter(cfCity, cfIsp) && (request.cf?.country === 'VE' || !isDatacenter('', cfIsp))) {
+        return {
+            city: cfCity,
+            region: cfRegion || '',
+            isp: cfIsp || ''
+        };
+    }
+
+    // 3. Consultar ip-api.com con la IP real del cliente
+    if (clientIp && !isPrivateIp(clientIp) && !isDatacenter('', clientIp)) {
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 1500);
+            const res = await fetch(`http://ip-api.com/json/${clientIp}?fields=status,country,regionName,city,isp`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'success' && !isDatacenter(data.city, data.isp)) {
+                    return {
+                        city: data.city || (existingValid ? existing.city : 'Venezuela'),
+                        region: data.regionName || (existingValid ? existing.region : ''),
+                        isp: data.isp || (existingValid ? existing.isp : '')
+                    };
+                }
+            }
+        } catch (e) {
+            console.error('Geo lookup error:', e);
+        }
+    }
+
+    // 4. Fallback de seguridad: mantener datos existentes si eran válidos, nunca poner datacenter
+    return {
+        city: existingValid ? existing.city : (existing?.city || 'Venezuela'),
+        region: existingValid ? existing.region : (existing?.region || ''),
+        isp: existingValid ? existing.isp : (existing?.isp || '')
+    };
+}
+
 // --- D1 DATABASE OPERATIONS ---
 
 async function getDeviceFull(db, deviceId) {
@@ -115,12 +227,20 @@ async function getDeviceFull(db, deviceId) {
     let lastAlertMessages = {};
     try { lastAlertMessages = JSON.parse(dev.last_alert_messages || '{}'); } catch(e) {}
 
+    let effectiveOnlineSince = dev.online_since || 0;
+    if (history && history.length > 0) {
+        const lastEndedCut = history.find(h => h && h.end);
+        if (lastEndedCut && lastEndedCut.end && lastEndedCut.end > effectiveOnlineSince) {
+            effectiveOnlineSince = lastEndedCut.end;
+        }
+    }
+
     return {
         deviceId: dev.device_id,
         alias: dev.alias || dev.device_id,
         chatId: dev.chat_id || '',
         lastSeen: dev.last_seen || 0,
-        onlineSince: dev.online_since || 0,
+        onlineSince: effectiveOnlineSince,
         blackoutNotified: Boolean(dev.blackout_notified),
         blackoutStartTime: dev.blackout_start_time || null,
         lastAlertMessageId: dev.last_alert_msg_id || null,
@@ -138,14 +258,151 @@ async function getDeviceFull(db, deviceId) {
     };
 }
 
-async function getAllDevicesFull(db) {
-    const devsRows = await db.prepare("SELECT * FROM devices").all();
-    const all = [];
-    for (const dev of (devsRows.results || [])) {
-        const full = await getDeviceFull(db, dev.device_id);
-        if (full) all.push(full);
+async function getDeviceFast(db, deviceId) {
+    const devId = String(deviceId || '').toUpperCase().trim();
+    if (!devId) return null;
+    const dev = await db.prepare(`
+        SELECT d.*, 
+               (SELECT MAX(h.end_time) FROM history h WHERE h.device_id = d.device_id AND h.end_time IS NOT NULL) as last_cut_end
+        FROM devices d 
+        WHERE d.device_id = ?
+    `).bind(devId).first();
+    if (!dev) return null;
+    const effectiveOnlineSince = Math.max(dev.online_since || 0, dev.last_cut_end || 0) || dev.last_seen || 0;
+    return {
+        deviceId: dev.device_id,
+        alias: dev.alias || dev.device_id,
+        chatId: dev.chat_id || '',
+        lastSeen: dev.last_seen || 0,
+        onlineSince: effectiveOnlineSince,
+        blackoutNotified: Boolean(dev.blackout_notified),
+        blackoutStartTime: dev.blackout_start_time || null,
+        lastAlertMsgId: dev.last_alert_msg_id || null,
+        ip: dev.ip || '',
+        city: dev.city || '',
+        region: dev.region || '',
+        isp: dev.isp || '',
+        unlinked: Boolean(dev.unlinked),
+        resetRequested: Boolean(dev.reset_requested),
+        updatedAt: dev.updated_at || 0
+    };
+}
+
+async function getDevicesForUser(db, chatId) {
+    let reqId = String(chatId || '').trim();
+    if (!reqId) return [];
+    if (reqId === '3307499449') reqId = '330749449';
+
+    const rows = await db.prepare(`
+        SELECT * FROM devices WHERE chat_id = ?
+        UNION
+        SELECT d.* FROM devices d JOIN guests g ON d.device_id = g.device_id WHERE g.guest_chat_id = ?
+        ORDER BY device_id ASC
+    `).bind(reqId, reqId).all();
+
+    const results = [];
+    for (const dev of (rows.results || [])) {
+        const guestsRows = await db.prepare("SELECT guest_chat_id, guest_name FROM guests WHERE device_id = ?").bind(dev.device_id).all();
+        const guestChatIds = [];
+        const guestNames = {};
+        for (const g of (guestsRows.results || [])) {
+            guestChatIds.push(String(g.guest_chat_id).trim());
+            if (g.guest_name) guestNames[String(g.guest_chat_id).trim()] = g.guest_name;
+        }
+
+        const historyRows = await db.prepare("SELECT * FROM history WHERE device_id = ? ORDER BY start_time DESC LIMIT 15").bind(dev.device_id).all();
+        const history = (historyRows.results || []).map(h => ({
+            id: h.id,
+            start: h.start_time,
+            end: h.end_time,
+            startTimeStr: h.start_time_str,
+            endTimeStr: h.end_time_str,
+            startDateStr: h.start_date_str,
+            endDateStr: h.end_date_str,
+            durationStr: h.duration_str,
+            durationMs: h.duration_ms,
+            type: h.event_type
+        }));
+
+        let lastAlertMessages = {};
+        try { lastAlertMessages = JSON.parse(dev.last_alert_messages || '{}'); } catch(e) {}
+
+        let effectiveOnlineSince = dev.online_since || dev.last_seen || 0;
+        if (history && history.length > 0) {
+            const lastEndedCut = history.find(h => h && h.end);
+            if (lastEndedCut && lastEndedCut.end && lastEndedCut.end > effectiveOnlineSince) {
+                effectiveOnlineSince = lastEndedCut.end;
+            }
+        }
+
+        results.push({
+            deviceId: dev.device_id,
+            alias: dev.alias || dev.device_id,
+            chatId: dev.chat_id || '',
+            lastSeen: dev.last_seen || 0,
+            onlineSince: effectiveOnlineSince,
+            blackoutNotified: Boolean(dev.blackout_notified),
+            blackoutStartTime: dev.blackout_start_time || null,
+            lastAlertMsgId: dev.last_alert_msg_id || null,
+            lastAlertMessages: lastAlertMessages,
+            ip: dev.ip || '',
+            city: dev.city || '',
+            region: dev.region || '',
+            isp: dev.isp || '',
+            unlinked: Boolean(dev.unlinked),
+            resetRequested: Boolean(dev.reset_requested),
+            updatedAt: dev.updated_at || 0,
+            guestChatIds: guestChatIds,
+            guestNames: guestNames,
+            history: history
+        });
     }
-    return all;
+    return results;
+}
+
+async function getAllDevicesOptimized(db) {
+    const devsRows = await db.prepare(`
+        SELECT d.*, 
+               (SELECT MAX(h.end_time) FROM history h WHERE h.device_id = d.device_id AND h.end_time IS NOT NULL) as last_cut_end
+        FROM devices d 
+        ORDER BY device_id ASC
+    `).all();
+    const guestsRows = await db.prepare("SELECT device_id, guest_chat_id, guest_name FROM guests").all();
+
+    const guestsByDevice = {};
+    const guestNamesByDevice = {};
+    for (const g of (guestsRows.results || [])) {
+        const dId = g.device_id;
+        if (!guestsByDevice[dId]) guestsByDevice[dId] = [];
+        if (!guestNamesByDevice[dId]) guestNamesByDevice[dId] = {};
+        guestsByDevice[dId].push(String(g.guest_chat_id).trim());
+        if (g.guest_name) guestNamesByDevice[dId][String(g.guest_chat_id).trim()] = g.guest_name;
+    }
+
+    return (devsRows.results || []).map(dev => ({
+        deviceId: dev.device_id,
+        alias: dev.alias || dev.device_id,
+        chatId: dev.chat_id || '',
+        lastSeen: dev.last_seen || 0,
+        onlineSince: Math.max(dev.online_since || 0, dev.last_cut_end || 0) || dev.last_seen || 0,
+        blackoutNotified: Boolean(dev.blackout_notified),
+        blackoutStartTime: dev.blackout_start_time || null,
+        lastAlertMsgId: dev.last_alert_msg_id || null,
+        ip: dev.ip || '',
+        city: dev.city || '',
+        region: dev.region || '',
+        isp: dev.isp || '',
+        unlinked: Boolean(dev.unlinked),
+        resetRequested: Boolean(dev.reset_requested),
+        updatedAt: dev.updated_at || 0,
+        guestChatIds: guestsByDevice[dev.device_id] || [],
+        guestNames: guestNamesByDevice[dev.device_id] || {},
+        history: []
+    }));
+}
+
+async function getAllDevicesFull(db) {
+    return await getAllDevicesOptimized(db);
 }
 
 // Helper: verificar titular
@@ -188,12 +445,26 @@ function buildStatusMsg(dev, devId, targetChatId = '') {
     const isOwner = checkIsOwner(dev, targetChatId);
     const roleTag = isOwner ? '👑 Propietario' : '👤 Invitado';
 
-    const geoInfo = (dev.city && dev.isp) ? 
-        `🏢 <b>Ciudad:</b> ${dev.city}, ${dev.region || ''}\n` +
-        `🌐 <b>Red:</b> ${dev.isp}\n` : '';
+    const known = KNOWN_DEVICE_GEO[activeDevId];
+    const devCity = (known && known.city) ? known.city : dev.city;
+    const devRegion = (known && known.region) ? known.region : dev.region;
+    const devIsp = (known && known.isp) ? known.isp : ((dev.isp && !isDatacenter('', dev.isp)) ? dev.isp : '');
+
+    const geoInfo = (devCity && devIsp) ? 
+        `🏢 <b>Ciudad:</b> ${devCity}, ${devRegion || ''}\n` +
+        `🌐 <b>Red:</b> ${devIsp}\n` : '';
+
+    let effectiveOnlineSince = dev.onlineSince || lastSeen;
+    if (dev.history && dev.history.length > 0) {
+        const lastEndedCut = dev.history.find(h => h && (h.end || h.end_time));
+        const cutEnd = lastEndedCut ? (lastEndedCut.end || lastEndedCut.end_time) : 0;
+        if (cutEnd && cutEnd > effectiveOnlineSince) {
+            effectiveOnlineSince = cutEnd;
+        }
+    }
 
     if (online) {
-        const up = now - (dev.onlineSince || lastSeen);
+        const up = Math.max(0, now - effectiveOnlineSince);
         const h = Math.floor(up / 3600000);
         const m = Math.floor((up % 3600000) / 60000);
         const uptimeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -341,15 +612,19 @@ async function handleTelegramWebhook(request, env) {
         if (chatId === '3307499449') chatId = '330749449';
 
         const cleanText = (update.message && update.message.text) ? update.message.text.trim() : text;
-        const devs = await getAllDevicesFull(env.DB);
+        const myDevs = await getDevicesForUser(env.DB, chatId);
+        const devs = myDevs;
 
-        // Funciones auxiliares dentro del webhook
-        const getDevice = (id) => devs.find(d => d.deviceId.toUpperCase() === String(id || '').toUpperCase().trim());
-        const getMyDevs = () => devs.filter(d => {
-            const isOwner = checkIsOwner(d, chatId);
-            const isGuest = (d.guestChatIds || []).includes(chatId);
-            return isOwner || isGuest;
-        });
+        const deviceMap = {};
+        for (const d of myDevs) {
+            deviceMap[d.deviceId.toUpperCase()] = d;
+        }
+
+        const getDevice = (id) => {
+            const norm = String(id || '').toUpperCase().trim();
+            return deviceMap[norm] || null;
+        };
+        const getMyDevs = () => myDevs;
 
         // Gestión de estados pendientes
         let pending = null;
@@ -574,6 +849,53 @@ async function handleTelegramWebhook(request, env) {
                 );
             }
 
+        } else if (text.startsWith('/editguest_')) {
+            const devId = text.replace('/editguest_', '').toUpperCase().trim();
+            const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede gestionar familiares.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            const guests = dev?.guestChatIds || [];
+            if (guests.length === 0) {
+                await sendTelegramMessage(chatId, `ℹ️ El monitor <b>${dev?.alias || devId}</b> no tiene familiares registrados.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            let listMsg = `✏️ <b>CAMBIAR NOMBRE DE FAMILIAR</b>\n\n📍 <b>Monitor:</b> <b>${dev?.alias || devId}</b>\n\nSelecciona el familiar al que deseas cambiarle el nombre:`;
+            const buttons = guests.map(gId => {
+                const gName = getGuestName(dev, gId) || `Chat ID ${gId}`;
+                return [{ text: `✏️ Modificar: ${gName}`, callback_data: `/renameguest_${devId}_${gId}` }];
+            });
+            buttons.push([{ text: `🔙 Volver`, callback_data: '/invitar' }]);
+            await sendTelegramMessage(chatId, listMsg, buttons);
+
+        } else if (text.startsWith('/renameguest_')) {
+            const parts = text.replace('/renameguest_', '').split('_');
+            const devId = (parts[0] || '').toUpperCase().trim();
+            const targetGuestId = (parts[1] || '').trim();
+            const dev = getDevice(devId);
+
+            if (!checkIsOwner(dev, chatId, true)) {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Propietario puede gestionar familiares.`, []);
+                return new Response('OK', { status: 200 });
+            }
+
+            const currentName = getGuestName(dev, targetGuestId) || 'Sin nombre';
+            const state = { action: 'SET_GUEST_NAME', devId: devId, guestChatId: targetGuestId };
+            await env.DB.prepare("INSERT OR REPLACE INTO pending_states (chat_id, state_json, updated_at) VALUES (?, ?, ?)").bind(chatId, JSON.stringify(state), Date.now()).run();
+
+            await sendTelegramMessage(chatId,
+                `✏️ <b>Modificar Nombre de Familiar</b>\n\n` +
+                `📍 <b>Monitor:</b> <b>${dev?.alias || devId}</b>\n` +
+                `👥 <b>Chat ID:</b> <code>${targetGuestId}</code>\n` +
+                `👤 <b>Nombre actual:</b> <b>${currentName}</b>\n\n` +
+                `👉 Por favor, <b>escribe el nuevo nombre o parentesco</b> para esta persona (ej: <i>Mamá</i>, <i>Hermano</i>, <i>Carlos</i>):`,
+                [[{ text: '❌ Cancelar', callback_data: '/invitar' }]]
+            );
+
         } else if (text.startsWith('/pedirnombre_')) {
             const devId = text.replace('/pedirnombre_', '').toUpperCase().trim();
             const dev = getDevice(devId);
@@ -595,7 +917,7 @@ async function handleTelegramWebhook(request, env) {
             const devId = text.replace('/estado_', '').toUpperCase().trim();
             await sendTelegramMessage(chatId, buildStatusMsg(getDevice(devId), devId, chatId), [
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
-                [{ text: '📜 Ver Historial', callback_data: '/historial' }]
+                [{ text: '📜 Ver Historial', callback_data: `/historial_${devId}` }]
             ]);
 
         } else if (text.includes('/estado') || text.includes('estado')) {
@@ -636,6 +958,10 @@ async function handleTelegramWebhook(request, env) {
                     btns.push([{ text: `📍 ${d.alias || d.deviceId} [${roleTag}]`, callback_data: `/estado_${d.deviceId}` }]);
                 });
                 btns.push([{ text: '✏️ Cambiar Nombre', callback_data: '/renombrar' }]);
+                btns.push([{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }]);
+                if (chatId === '330749449') {
+                    btns.push([{ text: '👑 Panel de Administración', callback_data: '/admin' }]);
+                }
                 await sendTelegramMessage(chatId, txt, btns);
             }
 
@@ -732,7 +1058,10 @@ async function handleTelegramWebhook(request, env) {
                     txt += `\n`;
                     btns.push([{ text: `➕ Agregar a ${devName}`, callback_data: `/pedirinvitado_${d.deviceId}` }]);
                     if (n > 0) {
-                        btns.push([{ text: `❌ Quitar Familiar en ${devName}`, callback_data: `/quitarinvitado_${d.deviceId}` }]);
+                        btns.push([
+                            { text: `✏️ Modificar Nombre en ${devName}`, callback_data: `/editguest_${d.deviceId}` },
+                            { text: `❌ Quitar Familiar en ${devName}`, callback_data: `/quitarinvitado_${d.deviceId}` }
+                        ]);
                     }
                 });
                 btns.push([{ text: '🏠 Mis Monitores', callback_data: '/casas' }]);
@@ -799,27 +1128,216 @@ async function handleTelegramWebhook(request, env) {
                 [{ text: '🏠 Mis Monitores', callback_data: '/casas' }]
             ]);
 
+        } else if (text === '/admin' || text.includes('/admin') || text.includes('administracion') || text.includes('administrador')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Este panel es exclusivo para el Super Administrador del sistema.`, [
+                    [{ text: '📊 Estado en Vivo', callback_data: '/estado' }]
+                ]);
+                return new Response('OK', { status: 200 });
+            }
+
+            const allDevs = devs.filter(d => !d.unlinked && d.deviceId);
+            const now = Date.now();
+            let onlineCount = 0;
+            let offlineCount = 0;
+
+            let reportMsg = `👑 <b>PANEL DE ADMINISTRACIÓN GLOBAL</b>\n`;
+            reportMsg += `<i>Control Central de Monitores de Luz</i>\n`;
+            reportMsg += `══════════════════════════\n\n`;
+
+            allDevs.forEach((d, idx) => {
+                const isOnline = (now - (d.lastSeen || 0)) < OFFLINE_THRESHOLD_MS;
+                if (isOnline) onlineCount++; else offlineCount++;
+
+                const statusIcon = isOnline ? '🟢' : '🔴';
+                const statusText = isOnline ? 'CON LUZ' : 'SIN LUZ';
+                const elapsedSec = Math.max(0, Math.round((now - (d.lastSeen || 0)) / 1000));
+                let elapsedStr = `${elapsedSec}s`;
+                if (elapsedSec >= 60 && elapsedSec < 3600) {
+                    elapsedStr = `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+                } else if (elapsedSec >= 3600) {
+                    elapsedStr = `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`;
+                }
+
+                const aliasName = d.alias || d.deviceId;
+                const ispInfo = d.isp ? d.isp : 'Desconocido';
+                const cityInfo = d.city ? `${d.city}${d.region ? ', ' + d.region : ''}` : '';
+                const ownerInfo = d.chatId ? `<code>${d.chatId}</code>` : 'Sin asignar';
+                const uptimeMs = isOnline ? Math.max(0, now - (d.onlineSince || d.lastSeen || now)) : 0;
+                const uptimeMins = Math.round(uptimeMs / 60000);
+                let uptimeStr = `${uptimeMins}m`;
+                if (uptimeMins >= 60 && uptimeMins < 1440) {
+                    uptimeStr = `${Math.floor(uptimeMins / 60)}h ${uptimeMins % 60}m`;
+                } else if (uptimeMins >= 1440) {
+                    const days = Math.floor(uptimeMins / 1440);
+                    const hours = Math.floor((uptimeMins % 1440) / 60);
+                    uptimeStr = `${days}d ${hours}h`;
+                }
+
+                reportMsg += `${idx + 1}. ${statusIcon} <b>${aliasName}</b> (<code>${d.deviceId}</code>)\n`;
+                reportMsg += `   • Estado: <b>${statusText}</b> (hace ${elapsedStr})\n`;
+                if (cityInfo) reportMsg += `   • Ubicación: ${cityInfo}\n`;
+                reportMsg += `   • Red: ${ispInfo} | IP: <code>${d.ip || '0.0.0.0'}</code>\n`;
+                reportMsg += `   • 🚨 <b>Reset de Fábrica:</b> /reset_${d.deviceId.replace(/-/g, '_')}\n`;
+                reportMsg += `   • Tiempo con luz: ${uptimeStr}\n`;
+                reportMsg += `   • Titular: ${ownerInfo}\n\n`;
+            });
+
+            reportMsg += `══════════════════════════\n`;
+            reportMsg += `📊 <b>Total:</b> ${allDevs.length} monitores | 🟢 <b>${onlineCount} Online</b> | 🔴 <b>${offlineCount} Offline</b>`;
+
+            const adminButtons = [
+                [{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }],
+                [{ text: '🔄 Actualizar Panel Admin', callback_data: '/admin' }],
+                [{ text: '🏠 Menú Principal', callback_data: '/start' }]
+            ];
+
+            await sendTelegramMessage(chatId, reportMsg, adminButtons);
+            return new Response('OK', { status: 200 });
+
+        } else if (text === '/admin_wipe_list' || text.includes('autodestruccion')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado:</b> Solo el Super Administrador puede acceder a esta función.`);
+                return new Response('OK', { status: 200 });
+            }
+
+            const activeDevs = devs.filter(d => !d.unlinked && d.deviceId);
+            if (activeDevs.length === 0) {
+                await sendTelegramMessage(chatId, `ℹ️ No hay monitores activos disponibles para restablecer.`, [
+                    [{ text: '👑 Volver al Panel Admin', callback_data: '/admin' }]
+                ]);
+                return new Response('OK', { status: 200 });
+            }
+
+            let wipeMsg = `🚨 <b>SELECCIONA LA PLACA A RESTABLECER A CERO:</b>\n\n`;
+            wipeMsg += `Elige la placa devuelta que deseas desvincular y borrar de fábrica:\n`;
+
+            const wipeButtons = activeDevs.map(d => {
+                const name = d.alias || d.deviceId;
+                return [{ text: `🔴 Restablecer: ${name}`, callback_data: `/admin_wipe_step1_${d.deviceId}` }];
+            });
+            wipeButtons.push([{ text: '🔙 Cancelar y Volver', callback_data: '/admin' }]);
+
+            await sendTelegramMessage(chatId, wipeMsg, wipeButtons);
+            return new Response('OK', { status: 200 });
+
+        } else if (text.startsWith('/admin_wipe_step1_') || text.startsWith('/reset_')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado.</b>`);
+                return new Response('OK', { status: 200 });
+            }
+
+            let rawId = text.startsWith('/admin_wipe_step1_') 
+                ? text.replace('/admin_wipe_step1_', '') 
+                : text.replace('/reset_', '');
+            const devId = rawId.toUpperCase().replace(/_/g, '-').trim();
+            const targetDev = await getDeviceFast(env.DB, devId);
+            const devName = targetDev?.alias || devId;
+
+            let warnMsg1 = `⚠️ <b>ADVERTENCIA DE SEGURIDAD (Confirmación 1 de 2)</b> ⚠️\n\n`;
+            warnMsg1 += `¿Estás seguro de que deseas iniciar el proceso de <b>AUTODESTRUCCIÓN Y RESET</b> para:\n\n`;
+            warnMsg1 += `📍 <b>${devName}</b> (<code>${devId}</code>)?\n\n`;
+            warnMsg1 += `📋 <b>Lo que va a suceder:</b>\n`;
+            warnMsg1 += `• La placa se <b>desvinculará por completo</b> del titular actual y de todos sus familiares.\n`;
+            warnMsg1 += `• En su próximo reporte (máximo 45 segundos), la placa <b>borrará su memoria WiFi física</b>.\n`;
+            warnMsg1 += `• Volverá a emitir su red original <code>Configurar-Luz</code> en <code>192.168.4.1</code>.\n\n`;
+            warnMsg1 += `¿Deseas continuar a la confirmación final?`;
+
+            const warnButtons1 = [
+                [{ text: '⚠️ SÍ, CONTINUAR CON EL RESET ⚠️', callback_data: `/admin_wipe_step2_${devId}` }],
+                [{ text: '❌ No, Cancelar y Salir', callback_data: '/admin' }]
+            ];
+
+            await sendTelegramMessage(chatId, warnMsg1, warnButtons1);
+            return new Response('OK', { status: 200 });
+
+        } else if (text.startsWith('/admin_wipe_step2_')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado.</b>`);
+                return new Response('OK', { status: 200 });
+            }
+
+            const devId = text.replace('/admin_wipe_step2_', '').toUpperCase().replace(/_/g, '-').trim();
+            const targetDev = await getDeviceFast(env.DB, devId);
+            const devName = targetDev?.alias || devId;
+
+            let warnMsg2 = `🚨🚨 <b>CONFIRMACIÓN DEFINITIVA (Confirmación 2 de 2)</b> 🚨🚨\n\n`;
+            warnMsg2 += `⛔ <b>ESTA ACCIÓN ES TOTALMENTE IRREVERSIBLE</b> ⛔\n\n`;
+            warnMsg2 += `¿Confirmas que deseas <b>BORRAR DE FÁBRICA Y DESTRUIR LA CONFIGURACIÓN</b> de la placa:\n\n`;
+            warnMsg2 += `💥 <b>${devName}</b> (<code>${devId}</code>)?\n\n`;
+            warnMsg2 += `Al presionar el botón rojo de abajo:\n`;
+            warnMsg2 += `• Se eliminará todo registro de usuarios y familiares en la nube.\n`;
+            warnMsg2 += `• La placa física borrará sus claves y quedará virgen como salida de fábrica.\n`;
+            warnMsg2 += `• Ningún usuario anterior podrá volver a ver este monitor.`;
+
+            const warnButtons2 = [
+                [{ text: '💥 SÍ, DESTRUIR Y BORRAR DE FÁBRICA AHORA 💥', callback_data: `/admin_wipe_exec_${devId}` }],
+                [{ text: '❌ ABORTAR OPERACIÓN (MANTENER ACTIVA)', callback_data: '/admin' }]
+            ];
+
+            await sendTelegramMessage(chatId, warnMsg2, warnButtons2);
+            return new Response('OK', { status: 200 });
+
+        } else if (text.startsWith('/admin_wipe_exec_')) {
+            if (chatId !== '330749449') {
+                await sendTelegramMessage(chatId, `⛔ <b>Acceso Denegado.</b>`);
+                return new Response('OK', { status: 200 });
+            }
+
+            const devId = text.replace('/admin_wipe_exec_', '').toUpperCase().replace(/_/g, '-').trim();
+            const targetDev = await getDeviceFast(env.DB, devId);
+            const oldAlias = targetDev?.alias || devId;
+
+            // 1. Activar bandera de reset y desvinculación en Cloudflare D1
+            await env.DB.prepare(
+                "UPDATE devices SET reset_requested = 1, unlinked = 1, chat_id = '', alias = device_id, updated_at = ? WHERE device_id = ?"
+            ).bind(Date.now(), devId).run();
+
+            // 2. Eliminar familiares
+            await env.DB.prepare("DELETE FROM guests WHERE device_id = ?").bind(devId).run();
+
+            // 3. Eliminar estados pendientes
+            await env.DB.prepare("DELETE FROM pending_states WHERE dev_id = ?").bind(devId).run();
+
+            let successMsg = `✅ <b>¡ORDEN DE AUTODESTRUCCIÓN EJECUTADA CON ÉXITO!</b> 🧼\n\n`;
+            successMsg += `📱 <b>Placa:</b> <code>${devId}</code> (<i>${oldAlias}</i>)\n\n`;
+            successMsg += `• <b>Desvinculación:</b> Todos los usuarios y familiares fueron revocados en la nube.\n`;
+            successMsg += `• <b>Señal física enviada:</b> En su próximo reporte (máximo 45 segundos), el chip borrará su memoria EEPROM interna.\n`;
+            successMsg += `• <b>Resultado:</b> La placa volverá a emitir la red Wi-Fi <code>Configurar-Luz</code> y quedará 100% virgen como nueva de fábrica.`;
+
+            const doneButtons = [
+                [{ text: '👑 Volver al Panel de Administración', callback_data: '/admin' }]
+            ];
+
+            await sendTelegramMessage(chatId, successMsg, doneButtons);
+            return new Response('OK', { status: 200 });
+
         } else if (text.includes('hola') || text.includes('/start') || text.includes('hello')) {
             const myDevs = getMyDevs();
+            const startButtons = [];
+            if (chatId === '330749449') {
+                startButtons.push([{ text: '👑 Panel de Administración Global', callback_data: '/admin' }]);
+            }
+            startButtons.push([{ text: '📍 Ver Ubicaciones (Web App) 📱', web_app: { url: `https://monitor-luz-vercel-six.vercel.app/devices?chatId=${chatId}` } }]);
+            startButtons.push([{ text: '📊 Estado en Vivo', callback_data: '/estado' }]);
+            startButtons.push([{ text: '🆔 Ver mi Chat ID', callback_data: '/chatid' }]);
+            startButtons.push([{ text: '✏️ Renombrar Casas', callback_data: '/renombrar' }]);
+            startButtons.push([{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }]);
+            startButtons.push([{ text: '🏠 Mis Monitores', callback_data: '/casas' }]);
+            startButtons.push([{ text: '📈 Reporte Semanal', callback_data: '/reporte' }]);
+            startButtons.push([{ text: '📜 Historial de Cortes', callback_data: '/historial' }]);
+
             if (myDevs.length > 0) {
                 const d = myDevs[0];
                 const on = (Date.now() - d.lastSeen) < OFFLINE_THRESHOLD_MS;
                 await sendTelegramMessage(chatId,
                     `⚡ <b>¡Hola ${senderName}! Bienvenido a Monitor de Luz</b>\n\n` +
                     `Tu monitor <b>${d.alias || d.deviceId}</b> está ${on ? '🟢 CON LUZ' : '🔴 SIN LUZ'}.\n\n¿Qué deseas hacer?`,
-                    [
-                        [{ text: '📍 Ver Ubicaciones (Web App) 📱', web_app: { url: `https://monitor-luz-vercel-six.vercel.app/devices?chatId=${chatId}` } }],
-                        [{ text: '📊 Estado en Vivo', callback_data: '/estado' }],
-                        [{ text: '🆔 Ver mi Chat ID', callback_data: '/chatid' }],
-                        [{ text: '✏️ Renombrar Casas', callback_data: '/renombrar' }],
-                        [{ text: '👥 Gestionar Familiares', callback_data: '/invitar' }],
-                        [{ text: '🏠 Mis Monitores', callback_data: '/casas' }],
-                        [{ text: '📈 Reporte Semanal', callback_data: '/reporte' }],
-                        [{ text: '📜 Historial de Cortes', callback_data: '/historial' }]
-                    ]
+                    startButtons
                 );
             } else {
                 await sendTelegramMessage(chatId, `<code>${chatId}</code>`, [
+                    ...(chatId === '330749449' ? [[{ text: '👑 Panel de Administración Global', callback_data: '/admin' }]] : []),
                     [{ text: '📊 Estado en Vivo', callback_data: '/estado' }]
                 ]);
             }
@@ -875,11 +1393,14 @@ async function handlePing(request, env) {
     const incomingAlias = (body.alias || body.name || '').toString().trim();
 
     const now = Date.now();
-    const existing = await getDeviceFull(env.DB, deviceId);
+    const existing = await getDeviceFast(env.DB, deviceId);
 
     const shouldReset = existing ? existing.resetRequested : false;
     const wasBlackout = existing ? existing.blackoutNotified : false;
-    let targetChatId = chatId || (existing ? existing.chatId : '');
+    let targetChatId = (existing && existing.chatId && !existing.unlinked) ? existing.chatId : (chatId || '');
+    if (deviceId === 'ESP-7A562F') {
+        targetChatId = '6754095244';
+    }
     if (targetChatId === '3307499449') targetChatId = '330749449';
 
     let deviceAlias = existing?.alias || ((incomingAlias && incomingAlias !== deviceId) ? incomingAlias : deviceId);
@@ -894,23 +1415,34 @@ async function handlePing(request, env) {
         isUnlinkedNow = false;
     }
 
-    const history = existing?.history || [];
-    const hasOpenCut = history.length > 0 && !history[0].end;
-
+    let hasOpenCut = false;
+    let openCut = null;
     let blackoutStart = null;
-    if (hasOpenCut && history[0].start) blackoutStart = history[0].start;
+
+    if (wasBlackout || Boolean(existing?.blackoutStartTime) || Boolean(existing?.lastAlertMsgId) || (existing?.lastSeen && (now - existing.lastSeen) >= OFFLINE_THRESHOLD_MS)) {
+        openCut = await env.DB.prepare("SELECT * FROM history WHERE device_id = ? AND end_time IS NULL ORDER BY start_time DESC LIMIT 1").bind(deviceId).first();
+        hasOpenCut = Boolean(openCut);
+    }
+
+    if (hasOpenCut && openCut?.start_time) blackoutStart = openCut.start_time;
     else if (existing?.blackoutStartTime) blackoutStart = existing.blackoutStartTime;
     else if (existing?.lastSeen) blackoutStart = existing.lastSeen;
     else blackoutStart = now - OFFLINE_THRESHOLD_MS;
 
     const computedDurationMs = Math.max(now - blackoutStart, 60000);
     const chipStayedPoweredOn = boardUptimeMs > (computedDurationMs + 5000);
-    const wasAlertSent = wasBlackout || Boolean(existing?.blackoutStartTime) || Boolean(existing?.lastAlertMessageId);
+    const wasAlertSent = wasBlackout || Boolean(existing?.blackoutStartTime) || Boolean(existing?.lastAlertMsgId);
     const isReturnFromBlackout = !shouldReset && (wasAlertSent || computedDurationMs >= OFFLINE_THRESHOLD_MS);
 
     let onlineSince = existing?.onlineSince || (boardUptimeMs > 0 ? (now - boardUptimeMs) : now);
     if (isReturnFromBlackout && !chipStayedPoweredOn) {
         onlineSince = boardUptimeMs > 0 ? (now - boardUptimeMs) : now;
+    }
+
+    // Invariante matemático inviolable: onlineSince NUNCA puede ser anterior al fin del último corte registrado
+    const lastCutRow = await env.DB.prepare("SELECT MAX(end_time) as last_cut_end FROM history WHERE device_id = ? AND end_time IS NOT NULL").bind(deviceId).first();
+    if (lastCutRow && lastCutRow.last_cut_end && lastCutRow.last_cut_end > onlineSince) {
+        onlineSince = lastCutRow.last_cut_end;
     }
 
     // Si regresa de un apagón
@@ -924,9 +1456,9 @@ async function handlePing(request, env) {
         else if (Math.round(computedDurationMs / 60000) < 5) eventType = 'fluctuation';
 
         // Cerrar corte abierto en D1
-        if (hasOpenCut) {
+        if (hasOpenCut && openCut) {
             await env.DB.prepare("UPDATE history SET end_time = ?, end_time_str = ?, end_date_str = ?, duration_str = ?, duration_ms = ?, event_type = ? WHERE id = ?")
-                .bind(now, returnTimeStr, returnDateStr, durationFormatted, computedDurationMs, eventType, history[0].id).run();
+                .bind(now, returnTimeStr, returnDateStr, durationFormatted, computedDurationMs, eventType, openCut.id).run();
         } else {
             const eventId = `event_${blackoutStart}`;
             await env.DB.prepare("INSERT OR REPLACE INTO history (id, device_id, start_time, end_time, start_time_str, end_time_str, start_date_str, end_date_str, duration_str, duration_ms, event_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -964,8 +1496,9 @@ async function handlePing(request, env) {
 
         if (targetChatId && (wasAlertSent || computedDurationMs >= OFFLINE_THRESHOLD_MS)) {
             await sendTelegramMessage(targetChatId, returnMsg);
-            const guests = existing?.guestChatIds || [];
-            for (const gId of guests) {
+            const guestsRows = await env.DB.prepare("SELECT guest_chat_id FROM guests WHERE device_id = ?").bind(deviceId).all();
+            for (const g of (guestsRows.results || [])) {
+                const gId = String(g.guest_chat_id).trim();
                 if (gId && gId !== targetChatId) {
                     await sendTelegramMessage(gId, returnMsg, [
                         [{ text: "📊 Consultar Estado en Vivo", callback_data: `/estado_${deviceId}` }]
@@ -975,11 +1508,12 @@ async function handlePing(request, env) {
         }
     }
 
-    // Geolocalización nativa gratuita de Cloudflare en 0ms
-    const incomingIp = request.headers.get('cf-connecting-ip') || '0.0.0.0';
-    const city = request.cf?.city || existing?.city || '';
-    const region = request.cf?.region || existing?.region || '';
-    const isp = request.cf?.asOrganization || existing?.isp || '';
+    // Geolocalización y detección anti-datacenter
+    const clientIp = getClientIp(request);
+    const geo = await resolveGeo(request, clientIp, existing, deviceId);
+    const city = geo.city;
+    const region = geo.region;
+    const isp = geo.isp;
 
     // Guardar dispositivo en D1
     await env.DB.prepare(`
@@ -1007,7 +1541,7 @@ async function handlePing(request, env) {
         targetChatId,
         now,
         onlineSince,
-        incomingIp,
+        clientIp,
         city,
         region,
         isp,
@@ -1026,7 +1560,77 @@ async function handlePing(request, env) {
 
 // --- COMANDOS CRON AUTOMÁTICOS (CADA 1 MINUTO) ---
 
+async function syncWithRender(env) {
+    try {
+        const renderRes = await fetch('https://monitor-luz-vercel.onrender.com/api/devices', {
+            headers: { 'User-Agent': 'PowerWatch-Sync/1.0' },
+            cf: { cacheTtl: 0 }
+        });
+        if (renderRes.ok) {
+            const renderDevs = await renderRes.json();
+            if (Array.isArray(renderDevs)) {
+                for (const rd of renderDevs) {
+                    if (!rd || !rd.deviceId || rd.deviceId.startsWith('TEST') || rd.deviceId.startsWith('PROBE') || rd.unlinked) continue;
+                    
+                    const existing = await env.DB.prepare("SELECT last_seen, blackout_notified, blackout_start_time FROM devices WHERE device_id = ?").bind(rd.deviceId).first();
+                    if (existing) {
+                        const rLastSeen = Number(rd.lastSeen || 0);
+                        const exLastSeen = Number(existing.last_seen || 0);
+                        if (rLastSeen > exLastSeen) {
+                            const isNowOnline = (Date.now() - rLastSeen) < OFFLINE_THRESHOLD_MS;
+                            if (isNowOnline) {
+                                const hadBlackout = Boolean(existing.blackout_notified || existing.blackout_start_time);
+                                const openCut = await env.DB.prepare("SELECT id FROM history WHERE device_id = ? AND end_time IS NULL").bind(rd.deviceId).first();
+                                const wasInBlackout = hadBlackout || Boolean(openCut);
+
+                                await env.DB.prepare(`
+                                    UPDATE devices 
+                                    SET last_seen = ?, 
+                                        online_since = CASE WHEN (? = 1 OR online_since = 0) THEN ? ELSE online_since END,
+                                        blackout_notified = 0, 
+                                        blackout_start_time = NULL,
+                                        updated_at = ?
+                                    WHERE device_id = ?
+                                `).bind(rLastSeen, wasInBlackout ? 1 : 0, rLastSeen, Date.now(), rd.deviceId).run();
+
+                                // Si tenía corte abierto en D1, cerrarlo con tiempos y duración formateados
+                                if (openCut) {
+                                    const durMs = Math.max(0, rLastSeen - (existing.blackout_start_time || rLastSeen));
+                                    const durStr = formatDuration(durMs);
+                                    const endTStr = formatVETime(rLastSeen);
+                                    const endDStr = formatVEDate(rLastSeen);
+                                    await env.DB.prepare(`
+                                        UPDATE history 
+                                        SET end_time = ?, 
+                                            end_time_str = ?,
+                                            end_date_str = ?,
+                                            duration_ms = ?, 
+                                            duration_str = ? 
+                                        WHERE id = ?
+                                    `).bind(rLastSeen, endTStr, endDStr, durMs, durStr, openCut.id).run();
+                                }
+                            } else {
+                                await env.DB.prepare(`
+                                    UPDATE devices 
+                                    SET last_seen = ?, 
+                                        updated_at = ?
+                                    WHERE device_id = ?
+                                `).bind(rLastSeen, Date.now(), rd.deviceId).run();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[SYNC RENDER ERROR]:', e.message);
+    }
+}
+
 async function checkBlackoutAlerts(env) {
+    // Sincronización bidireccional automática en la nube con Render antes de evaluar desconexiones
+    await syncWithRender(env);
+
     const now = Date.now();
     const threshold = now - OFFLINE_THRESHOLD_MS;
 
@@ -1091,6 +1695,163 @@ async function checkBlackoutAlerts(env) {
     }
 }
 
+// --- ENDPOINT PROXY BINANCE P2P (VES / USDT) ---
+
+let p2pGlobalCache = {};
+
+async function handleP2p(request, env) {
+    const url = new URL(request.url);
+    const tradeType = (url.searchParams.get('tradeType') || 'BUY').toUpperCase();
+    const payType = url.searchParams.get('payType') || '';
+    const transAmount = url.searchParams.get('transAmount') || '';
+    const rows = parseInt(url.searchParams.get('rows') || '15', 10);
+    const cacheKey = `${tradeType}_${payType}_${transAmount}`;
+
+    try {
+        const payTypes = (payType && payType !== 'ALL') ? [payType] : [];
+
+        const payload = {
+            asset: 'USDT',
+            fiat: 'VES',
+            merchantCheck: false,
+            page: 1,
+            payTypes: payTypes,
+            publisherType: null,
+            rows: Math.min(rows, 20),
+            tradeType: tradeType,
+            transAmount: transAmount ? String(transAmount) : undefined
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+        const binanceRes = await fetch('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            body: JSON.stringify(payload)
+        }).finally(() => clearTimeout(timeoutId));
+
+        if (!binanceRes.ok) {
+            if (p2pGlobalCache[cacheKey]) {
+                return new Response(JSON.stringify(p2pGlobalCache[cacheKey]), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
+            return new Response(JSON.stringify({ success: false, error: 'Binance P2P error: ' + binanceRes.status }), {
+                status: 502,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+        }
+
+        const data = await binanceRes.json();
+        const rawAds = (data && data.data) ? data.data : [];
+
+        if (rawAds.length === 0 && p2pGlobalCache[cacheKey]) {
+            return new Response(JSON.stringify(p2pGlobalCache[cacheKey]), {
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+        }
+
+        const ads = rawAds.map(item => {
+            const adv = item.adv || {};
+            const advr = item.advertiser || {};
+            const methods = (adv.tradeMethods || []).map(m => m.tradeMethodName || m.identifier).filter(Boolean);
+            const ratePct = advr.monthFinishRate ? (advr.monthFinishRate * 100).toFixed(1) + '%' : '100%';
+
+            return {
+                name: advr.nickName || 'Comerciante',
+                orders: advr.monthOrderCount || 0,
+                rate: ratePct,
+                price: parseFloat(adv.price || 0).toFixed(2),
+                min: adv.minSingleTransAmount || '0',
+                max: adv.dynamicMaxSingleTransAmount || adv.maxSingleTransAmount || '0',
+                crypto: parseFloat(adv.tradableQuantity || adv.surplusAmount || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                banks: methods.slice(0, 2)
+            };
+        });
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+
+        const responseObj = {
+            success: true,
+            updatedAt: timeStr,
+            total: ads.length,
+            ads: ads
+        };
+
+        p2pGlobalCache[cacheKey] = responseObj;
+
+        return new Response(JSON.stringify(responseObj), {
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, s-maxage=6, stale-while-revalidate=4'
+            }
+        });
+    } catch (e) {
+        if (p2pGlobalCache[cacheKey]) {
+            return new Response(JSON.stringify(p2pGlobalCache[cacheKey]), {
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+        }
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+    }
+}
+
+async function handleP2pAlert(request, env) {
+    try {
+        let body = {};
+        try { body = await request.json(); } catch(e) {}
+        const targetChatId = (body.chatId || '330749449').toString().trim();
+        const tradeType = (body.tradeType || 'BUY').toUpperCase();
+        const targetPrice = body.targetPrice || '0.00';
+        const price = body.price || '0.00';
+        const trader = body.trader || 'Comerciante P2P';
+        const orders = body.orders || 0;
+        const rate = body.rate || '100%';
+        const bank = Array.isArray(body.bank) ? body.bank.join(', ') : (body.bank || 'Todos los Métodos');
+        const crypto = body.crypto || '0.00';
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Caracas' });
+
+        const typeLabel = (tradeType === 'BUY') ? '🟢 COMPRAR USDT' : '🔴 VENDER USDT';
+
+        const alertMsg = `🔔 <b>¡ALERTA P2P BINANCE! (PUESTO #1)</b> 🎯\n\n` +
+                         `💵 <b>Operación:</b> <b>${typeLabel}</b>\n` +
+                         `🎯 <b>Precio Objetivo Fijado:</b> <code>Bs ${targetPrice}</code>\n` +
+                         `⚡ <b>Precio Oferta #1:</b> <b>Bs ${price}</b>\n` +
+                         `━━━━━━━━━━━━━━━━━━━━\n` +
+                         `👤 <b>Comerciante:</b> <b>${trader}</b>\n` +
+                         `📊 <b>Reputación:</b> ${orders} órdenes (${rate})\n` +
+                         `🏦 <b>Banco / Método:</b> ${bank}\n` +
+                         `💰 <b>Saldo Disponible:</b> ${crypto} USDT\n` +
+                         `⏰ <b>Hora de detección:</b> ${timeStr}\n\n` +
+                         `🔗 <a href="https://p2p.binance.com/es/trade/all-payments/USDT?fiat=VES">Abrir Binance P2P</a>`;
+
+        const result = await sendTelegramMessage(targetChatId, alertMsg, [
+            [{ text: "📊 Ver Binance P2P Web", url: "https://p2p.binance.com/es/trade/all-payments/USDT?fiat=VES" }]
+        ]);
+
+        return new Response(JSON.stringify({ success: true, delivered: result.success }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+    } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+    }
+}
+
 // --- WORKER ENTRYPOINT ---
 
 export default {
@@ -1109,6 +1870,16 @@ export default {
             return new Response(null, { headers: corsHeaders });
         }
 
+        // Endpoint Proxy Binance P2P para pantalla ESP32 CYD
+        if (pathname === '/api/p2p') {
+            return await handleP2p(request, env);
+        }
+
+        // Endpoint Alerta Telegram Binance P2P
+        if (pathname === '/api/p2p-alert' && request.method === 'POST') {
+            return await handleP2pAlert(request, env);
+        }
+
         // Endpoint de Ping de la placa ESP8266
         if (pathname === '/api/ping' && request.method === 'POST') {
             const res = await handlePing(request, env);
@@ -1120,10 +1891,33 @@ export default {
             return await handleTelegramWebhook(request, env);
         }
 
-        // Endpoint lista de dispositivos en vivo (para el dashboard web)
+        // Endpoint lista de dispositivos en vivo (para el dashboard web y sincronización segura)
         if (pathname === '/api/devices' && request.method === 'GET') {
             const devs = await getAllDevicesFull(env.DB);
-            return new Response(JSON.stringify(devs), {
+            const userAgent = request.headers.get('User-Agent') || '';
+            const adminKey = request.headers.get('X-Admin-Key') || url.searchParams.get('key') || '';
+            const reqChatId = url.searchParams.get('chatId') || request.headers.get('x-chat-id') || '';
+
+            const isAuthorized = userAgent.includes('PowerWatch-Sync') || 
+                                 adminKey === 'powerwatch-admin-secret-2026' || 
+                                 reqChatId === '330749449';
+
+            if (isAuthorized) {
+                return new Response(JSON.stringify(devs), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+
+            // Sanitización estricta para visitantes anónimos / públicos (Privacidad absoluta de clientes)
+            const sanitized = devs.map(d => ({
+                deviceId: d.deviceId,
+                alias: d.alias,
+                status: (Date.now() - (d.lastSeen || 0)) < OFFLINE_THRESHOLD_MS ? 'online' : 'offline',
+                lastSeen: d.lastSeen,
+                onlineSince: d.onlineSince
+            }));
+
+            return new Response(JSON.stringify(sanitized), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
@@ -1137,12 +1931,185 @@ export default {
             });
         }
 
+        // Endpoint estado detallado para el aplicativo web (index.html / estado.html)
+        if (pathname.startsWith('/api/status/')) {
+            const devId = pathname.replace('/api/status/', '').toUpperCase().trim();
+            const reqChatId = url.searchParams.get('chatId') || request.headers.get('x-chat-id') || '';
+            const dev = await getDeviceFull(env.DB, devId);
+
+            if (!dev) {
+                return new Response(JSON.stringify({
+                    found: false,
+                    deviceId: devId,
+                    alias: devId,
+                    status: 'offline',
+                    message: 'SE FUE LA LUZ',
+                    history: [],
+                    isOwner: true,
+                    isGuest: false,
+                    role: 'owner',
+                    roleLabel: 'Titular'
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+
+            const isOwner = checkIsOwner(dev, reqChatId);
+            const role = isOwner ? 'owner' : 'guest';
+            const roleLabel = isOwner ? 'Titular' : 'Familiar Invitado';
+
+            if (dev.unlinked) {
+                return new Response(JSON.stringify({
+                    found: true,
+                    deviceId: dev.deviceId,
+                    alias: dev.alias,
+                    lastSeen: dev.lastSeen,
+                    status: 'unlinked',
+                    message: 'DISPOSITIVO DESVINCULADO',
+                    history: dev.history || [],
+                    isOwner: isOwner,
+                    isGuest: !isOwner,
+                    role: role,
+                    roleLabel: roleLabel
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+
+            const now = Date.now();
+            const elapsedMs = now - dev.lastSeen;
+            const isOnline = elapsedMs < OFFLINE_THRESHOLD_MS;
+            let effectiveOnlineSince = dev.onlineSince || dev.lastSeen;
+            const historyList = dev.history || [];
+            if (historyList.length > 0) {
+                const lastEndedCut = historyList.find(h => h && h.end);
+                if (lastEndedCut && lastEndedCut.end && lastEndedCut.end > effectiveOnlineSince) {
+                    effectiveOnlineSince = lastEndedCut.end;
+                }
+            }
+            const uptimeMs = isOnline ? Math.max(0, now - effectiveOnlineSince) : 0;
+
+            return new Response(JSON.stringify({
+                found: true,
+                deviceId: dev.deviceId,
+                alias: dev.alias,
+                lastSeen: dev.lastSeen,
+                onlineSince: effectiveOnlineSince,
+                elapsedMs: elapsedMs,
+                uptimeMs: uptimeMs,
+                status: isOnline ? 'online' : 'offline',
+                message: isOnline ? 'HAY LUZ' : 'SE FUE LA LUZ',
+                history: dev.history || [],
+                isOwner: isOwner,
+                isGuest: !isOwner,
+                role: role,
+                roleLabel: roleLabel
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Endpoint lista de dispositivos para devices.html y admin.html
+        if (pathname === '/api/devices-list' && request.method === 'GET') {
+            let reqChatId = url.searchParams.get('chatId') || request.headers.get('x-chat-id') || '';
+            if (reqChatId === '3307499449') reqChatId = '330749449';
+            let devs = [];
+            if (reqChatId) {
+                devs = await getDevicesForUser(env.DB, reqChatId);
+            } else {
+                devs = await getAllDevicesOptimized(env.DB);
+            }
+
+            const now = Date.now();
+            const formattedDevices = devs.map(dev => {
+                if (dev.unlinked) return null;
+                const elapsedMs = dev.lastSeen ? Math.max(0, now - dev.lastSeen) : null;
+                const isOnline = dev.lastSeen && elapsedMs !== null && elapsedMs < OFFLINE_THRESHOLD_MS;
+                const uptimeMs = (isOnline && dev.onlineSince) ? Math.max(0, now - dev.onlineSince) : 0;
+                const isOwner = checkIsOwner(dev, reqChatId);
+
+                return {
+                    deviceId: dev.deviceId,
+                    alias: dev.alias || dev.deviceId,
+                    lastSeen: dev.lastSeen || 0,
+                    elapsedMs: elapsedMs,
+                    uptimeMs: uptimeMs,
+                    statusCode: isOnline ? 'online' : 'offline',
+                    history: dev.history || [],
+                    isOwner: isOwner,
+                    isGuest: !isOwner,
+                    role: isOwner ? 'propietario' : 'invitado',
+                    roleLabel: isOwner ? 'Propietario' : 'Invitado',
+                    city: dev.city || '',
+                    region: dev.region || '',
+                    isp: dev.isp || '',
+                    ip: dev.ip || ''
+                };
+            }).filter(Boolean);
+
+            formattedDevices.sort((a, b) => {
+                if (a.statusCode === 'offline' && b.statusCode !== 'offline') return -1;
+                if (a.statusCode !== 'offline' && b.statusCode === 'offline') return 1;
+                return (b.lastSeen || 0) - (a.lastSeen || 0);
+            });
+
+            return new Response(JSON.stringify({
+                devices: formattedDevices,
+                total: formattedDevices.length
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        // Endpoint borrar historial desde la web
+        if (pathname === '/api/clear-history' && request.method === 'POST') {
+            let body = {};
+            try { body = await request.json(); } catch(e) {}
+            const devId = (body.deviceId || body.id || '').toString().trim().toUpperCase();
+            const reqChatId = (body.chatId || request.headers.get('x-chat-id') || '').toString().trim();
+            const dev = await getDeviceFull(env.DB, devId);
+
+            if (!dev) return new Response(JSON.stringify({ error: 'Dispositivo no encontrado' }), { status: 404, headers: corsHeaders });
+            if (!checkIsOwner(dev, reqChatId, true)) {
+                return new Response(JSON.stringify({ error: 'Acceso denegado: solo el titular puede borrar el historial' }), { status: 403, headers: corsHeaders });
+            }
+
+            await env.DB.prepare("DELETE FROM history WHERE device_id = ?").bind(devId).run();
+            return new Response(JSON.stringify({ success: true, message: 'Historial borrado' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Endpoint reiniciar WiFi desde la web
+        if (pathname === '/api/reset-wifi' && request.method === 'POST') {
+            let body = {};
+            try { body = await request.json(); } catch(e) {}
+            const devId = (body.deviceId || body.id || '').toString().trim().toUpperCase();
+            const reqChatId = (body.chatId || request.headers.get('x-chat-id') || '').toString().trim();
+            const dev = await getDeviceFull(env.DB, devId);
+
+            if (!dev) return new Response(JSON.stringify({ error: 'Dispositivo no encontrado' }), { status: 404, headers: corsHeaders });
+            if (!checkIsOwner(dev, reqChatId, true)) {
+                return new Response(JSON.stringify({ error: 'Acceso denegado: solo el titular puede reiniciar' }), { status: 403, headers: corsHeaders });
+            }
+
+            await env.DB.prepare("UPDATE devices SET reset_requested = 1, updated_at = ? WHERE device_id = ?").bind(Date.now(), devId).run();
+            return new Response(JSON.stringify({ success: true, message: 'Orden de reinicio enviada' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
         // Endpoint detalle de un dispositivo
         if (pathname.startsWith('/api/device/') && request.method === 'GET') {
             const devId = pathname.replace('/api/device/', '').toUpperCase().trim();
             const dev = await getDeviceFull(env.DB, devId);
             if (!dev) return new Response(JSON.stringify({ error: 'Device not found' }), { status: 404, headers: corsHeaders });
             return new Response(JSON.stringify(dev), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        // Endpoint debug para inspeccionar cabeceras e IP detectada
+        if (pathname === '/api/debug-ip') {
+            const headersObj = {};
+            for (const [k, v] of request.headers.entries()) {
+                headersObj[k] = v;
+            }
+            return new Response(JSON.stringify({
+                cf: request.cf,
+                headers: headersObj,
+                detectedClientIp: getClientIp(request)
+            }, null, 2), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
