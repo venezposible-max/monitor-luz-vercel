@@ -7,12 +7,24 @@
   },
   "rewrites": [
     {
+      "source": "/api/p2p",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/p2p-alert",
+      "destination": "/api/index.js"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://powerwatch.venezposible.workers.dev/api/$1"
     },
     {
       "source": "/devices",
-      "destination": "https://powerwatch.venezposible.workers.dev/api/devices"
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/estado",
+      "destination": "/api/index.js"
     },
     {
       "source": "/(.*)",

@@ -766,7 +766,7 @@
                         </div>
                         <div>
                             <span>${endLabel}:</span>
-                            <strong style="color: ${item.end ? '#fff' : '#ef4444'}; display: block;">${item.endTimeStr || 'En curso...'}</strong>
+                            <strong style="color: ${item.end ? '#fff' : '#ef4444'}; display: block;">${item.end ? (item.endTimeStr || 'Restablecido') : 'En curso...'}</strong>
                             <small>${item.endDateStr || ''}</small>
                         </div>
                     </div>

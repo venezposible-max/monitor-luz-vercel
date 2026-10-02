@@ -1113,7 +1113,7 @@ async function handleTelegramWebhook(request, env) {
                 `⚠️ <b>IMPORTANTE:</b>\n` +
                 `1. Realiza este paso <b>estando físicamente en tu casa</b> (conectado al WiFi de tu casa o con el GPS encendido en tu móvil).\n` +
                 `2. Una vez guardada, la ubicación <b>quedará bloqueada automáticamente</b> para que nunca se altere cuando salgas de casa.\n\n` +
-                `👇 Presiona el botón verde de abajo para enviar tu ubicación actual:`,
+                `👇 Presiona el botón rojo de abajo para enviar tu ubicación actual:`,
                 [
                     [{ text: "📍 Enviar Mi Ubicación Actual", request_location: true }],
                     [{ text: "❌ Cancelar" }]
@@ -1148,7 +1148,7 @@ async function handleTelegramWebhook(request, env) {
                         `⚠️ <b>IMPORTANTE:</b>\n` +
                         `1. Realiza este paso <b>estando físicamente en tu casa</b> (conectado al WiFi de tu casa o con el GPS encendido en tu móvil).\n` +
                         `2. Una vez guardada, la ubicación <b>quedará bloqueada automáticamente</b> para que nunca se altere cuando viajes o estés fuera de casa.\n\n` +
-                        `👇 Presiona el botón verde de abajo para enviar tu ubicación actual:`,
+                        `👇 Presiona el botón rojo de abajo para enviar tu ubicación actual:`,
                         [
                             [{ text: "📍 Enviar Mi Ubicación Actual", request_location: true }],
                             [{ text: "❌ Cancelar" }]
